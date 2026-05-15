@@ -33,9 +33,9 @@ suite('AiService', () => {
         assert.strictEqual(result.length, 0);
     });
 
-    test('stub generateParsePattern returns empty string', async () => {
+    test('stub generateParsePattern returns default pattern', async () => {
         const result = await stubService.generateParsePattern('some example output', 'test command');
-        assert.strictEqual(result, '');
+        assert.ok(result.pattern.includes('${file}'));
     });
 
     test('stub explainIssue returns not-available message', async () => {

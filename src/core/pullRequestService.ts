@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PullRequest, PullRequestStatus, ReviewPriority } from '../types';
+import { PullRequest, PullRequestStatus, ReviewPriority, UserNeedLevel } from '../types';
 import { ICodeReviewProvider, PullRequestFilter } from '../providers/provider';
 import { IAiService } from '../ai/aiService';
 import { logger } from '../logging/logger';
@@ -74,6 +74,11 @@ export class PullRequestService {
                 pr.aiSummary = parsed.summary || undefined;
                 pr.priority = parsed.priority || undefined;
                 pr.relevantLinks = parsed.links;
+
+                // AI can upgrade userNeed if it detects the user should pay attention
+                if (parsed.userNeed) {
+                    pr.userNeed = parsed.userNeed;
+                }
             } catch (error) {
                 logger.warn(`Failed to enrich PR ${pr.id} with AI info`, error);
             }
@@ -86,10 +91,12 @@ export class PullRequestService {
     private parseSummarizeResponse(response: string): {
         summary: string | null;
         priority: ReviewPriority | null;
+        userNeed: UserNeedLevel | null;
         links: Array<{ title: string; url: string; type: 'other' }>;
     } {
         let summary: string | null = null;
         let priority: ReviewPriority | null = null;
+        let userNeed: UserNeedLevel | null = null;
         const links: Array<{ title: string; url: string; type: 'other' }> = [];
 
         for (const line of response.split('\n')) {
@@ -100,6 +107,11 @@ export class PullRequestService {
                 const p = trimmed.substring('PRIORITY:'.length).trim().toLowerCase();
                 if (['blocking', 'yes', 'interest', 'no'].includes(p)) {
                     priority = p as ReviewPriority;
+                }
+            } else if (trimmed.startsWith('USER_NEED:')) {
+                const u = trimmed.substring('USER_NEED:'.length).trim().toLowerCase();
+                if (['blocking', 'required', 'optional', 'fyi'].includes(u)) {
+                    userNeed = u as UserNeedLevel;
                 }
             } else if (trimmed.startsWith('LINKS:')) {
                 const linkStr = trimmed.substring('LINKS:'.length).trim();
@@ -114,7 +126,7 @@ export class PullRequestService {
             }
         }
 
-        return { summary, priority, links };
+        return { summary, priority, userNeed, links };
     }
 
     /** Advanced filtering that works across all providers (useful for ADO) */
@@ -137,8 +149,8 @@ export class PullRequestService {
                 if (!filter.authors.includes(pr.author)) { return false; }
             }
 
-            if (filter.isUserRequired !== undefined) {
-                if (pr.isUserRequired !== filter.isUserRequired) { return false; }
+            if (filter.userNeed && filter.userNeed.length > 0) {
+                if (!filter.userNeed.includes(pr.userNeed)) { return false; }
             }
 
             if (filter.priority && filter.priority.length > 0) {
@@ -158,7 +170,7 @@ export interface AdvancedFilter {
     searchText?: string;
     statuses?: PullRequestStatus[];
     authors?: string[];
-    isUserRequired?: boolean;
+    userNeed?: UserNeedLevel[];
     priority?: string[];
     labels?: string[];
 }

@@ -215,7 +215,7 @@ function mapPullRequest(pr: any, providerName: string): PullRequest {
         updatedAt: new Date(pr.updated_at),
         reviewers,
         labels: (pr.labels ?? []).map((l: any) => l.name ?? l),
-        isUserRequired: false,
+        userNeed: 'optional',
         providerName,
     };
 }

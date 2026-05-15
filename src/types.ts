@@ -28,8 +28,8 @@ export interface PullRequest {
     reviewers: Reviewer[];
     /** Labels / tags */
     labels: string[];
-    /** Whether the current user is a required reviewer */
-    isUserRequired: boolean;
+    /** How much the user's attention is needed */
+    userNeed: UserNeedLevel;
     /** AI-generated priority assessment */
     priority?: ReviewPriority;
     /** AI-generated brief description */
@@ -43,6 +43,9 @@ export interface PullRequest {
 export type PullRequestStatus = 'open' | 'closed' | 'merged' | 'draft' | 'abandoned';
 
 export type ReviewPriority = 'blocking' | 'yes' | 'interest' | 'no';
+
+/** How much the current user's attention is needed for this PR */
+export type UserNeedLevel = 'blocking' | 'required' | 'optional' | 'fyi';
 
 export interface Reviewer {
     name: string;

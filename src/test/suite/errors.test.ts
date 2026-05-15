@@ -39,4 +39,32 @@ suite('Errors', () => {
         const err = new AiError('request failed', original);
         assert.strictEqual(err.cause, original);
     });
+
+    test('ConfigError', () => {
+        const err = new ConfigError('invalid provider');
+        assert.strictEqual(err.code, 'CONFIG_ERROR');
+        assert.ok(err.userMessage?.includes('Configuration'));
+    });
+
+    test('ProviderError with empty provider name', () => {
+        const err = new ProviderError('generic failure', '');
+        assert.strictEqual(err.code, 'PROVIDER_ERROR');
+        assert.strictEqual(err.providerName, '');
+    });
+
+    test('ToolError with cause', () => {
+        const cause = new Error('exec failed');
+        const err = new ToolError('tool crash', 'linter', cause);
+        assert.strictEqual(err.cause, cause);
+        assert.strictEqual(err.toolName, 'linter');
+    });
+
+    test('all error types extend CodepilotReviewError', () => {
+        assert.ok(new AuthError('x') instanceof CodepilotReviewError);
+        assert.ok(new ProviderError('x', 'test') instanceof CodepilotReviewError);
+        assert.ok(new ToolError('x', 'y') instanceof CodepilotReviewError);
+        assert.ok(new AiError('x') instanceof CodepilotReviewError);
+        assert.ok(new AiNotAvailableError() instanceof CodepilotReviewError);
+        assert.ok(new ConfigError('x') instanceof CodepilotReviewError);
+    });
 });

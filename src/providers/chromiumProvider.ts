@@ -494,7 +494,7 @@ class ChromiumPullRequestProvider implements IPullRequestProvider {
             updatedAt: new Date(change.updated),
             reviewers,
             labels,
-            isUserRequired: false,
+            userNeed: 'optional',
             providerName: 'chromium',
         };
     }

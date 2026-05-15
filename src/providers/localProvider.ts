@@ -141,7 +141,7 @@ class LocalPullRequestProvider implements IPullRequestProvider {
                 updatedAt: new Date(lastCommit[3] || Date.now()),
                 reviewers: [],
                 labels: [],
-                isUserRequired: true,
+                userNeed: 'required',
                 providerName: 'local',
             };
 

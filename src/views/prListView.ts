@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PullRequest, PullRequestStatus, ReviewPriority } from '../types';
+import { PullRequest, PullRequestStatus, UserNeedLevel, ReviewPriority } from '../types';
 import { PullRequestService } from '../core/pullRequestService';
 
 /**
@@ -12,6 +12,8 @@ export class PrListViewProvider implements vscode.TreeDataProvider<PrTreeItem> {
 
     private filterText: string = '';
     private statusFilter: PullRequestStatus[] = [];
+    private userNeedFilter: UserNeedLevel[] = [];
+    private priorityFilter: ReviewPriority[] = [];
 
     constructor(private prService: PullRequestService) {}
 
@@ -26,6 +28,16 @@ export class PrListViewProvider implements vscode.TreeDataProvider<PrTreeItem> {
 
     setStatusFilter(statuses: PullRequestStatus[]): void {
         this.statusFilter = statuses;
+        this.refresh();
+    }
+
+    setUserNeedFilter(needs: UserNeedLevel[]): void {
+        this.userNeedFilter = needs;
+        this.refresh();
+    }
+
+    setPriorityFilter(priorities: ReviewPriority[]): void {
+        this.priorityFilter = priorities;
         this.refresh();
     }
 
@@ -54,6 +66,14 @@ export class PrListViewProvider implements vscode.TreeDataProvider<PrTreeItem> {
             filtered = filtered.filter(pr => this.statusFilter.includes(pr.status));
         }
 
+        if (this.userNeedFilter.length > 0) {
+            filtered = filtered.filter(pr => this.userNeedFilter.includes(pr.userNeed));
+        }
+
+        if (this.priorityFilter.length > 0) {
+            filtered = filtered.filter(pr => pr.priority && this.priorityFilter.includes(pr.priority));
+        }
+
         return filtered.map(pr => new PrTreeItem(pr));
     }
 
@@ -63,6 +83,7 @@ export class PrListViewProvider implements vscode.TreeDataProvider<PrTreeItem> {
         details.push(PrTreeItem.detail('Author', pr.author));
         details.push(PrTreeItem.detail('Branch', `${pr.sourceBranch} → ${pr.targetBranch}`));
         details.push(PrTreeItem.detail('Status', pr.status));
+        details.push(PrTreeItem.detail('User Need', pr.userNeed));
 
         if (pr.priority) {
             details.push(PrTreeItem.detail('Priority', pr.priority));
@@ -112,7 +133,7 @@ export class PrTreeItem extends vscode.TreeItem {
             id: '', title: `${label}: ${value}`, description: '', author: '',
             status: 'open', sourceBranch: '', targetBranch: '',
             createdAt: new Date(), updatedAt: new Date(),
-            reviewers: [], labels: [], isUserRequired: false, providerName: '',
+            reviewers: [], labels: [], userNeed: 'optional', providerName: '',
         };
         return new PrTreeItem(dummyPr, true);
     }

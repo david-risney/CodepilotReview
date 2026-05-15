@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReviewIssue } from './types';
+import { ReviewIssue, PullRequestStatus, ReviewPriority, UserNeedLevel } from './types';
 import { Configuration } from './config/configuration';
 import { LocalProvider } from './providers/localProvider';
 import { AzureDevOpsProvider } from './providers/adoProvider';
@@ -143,6 +143,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         prService.setProvider(currentProvider);
         sessionService.setProvider(currentProvider);
         diffContentProvider.setProvider(currentProvider);
+        commentController.setLocalProvider(providerName === 'local');
 
         prListView.refresh();
         logger.info(`Provider set to: ${currentProvider.name}`);
@@ -196,12 +197,71 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
 
         vscode.commands.registerCommand('codepilotReview.filterPRs', async () => {
-            const text = await vscode.window.showInputBox({
-                prompt: 'Filter pull requests',
-                placeHolder: 'Search by title, author, description...',
-            });
-            if (text !== undefined) {
-                prListView.setFilter(text);
+            const filterType = await vscode.window.showQuickPick(
+                [
+                    { label: '$(search) Text Search', description: 'Filter by title, author, description', value: 'text' },
+                    { label: '$(filter) Status', description: 'Filter by PR status', value: 'status' },
+                    { label: '$(person) User Need', description: 'Filter by how much your attention is needed', value: 'userNeed' },
+                    { label: '$(arrow-up) Priority', description: 'Filter by AI-assessed priority', value: 'priority' },
+                    { label: '$(close) Clear Filters', description: 'Remove all filters', value: 'clear' },
+                ],
+                { placeHolder: 'Choose filter type' }
+            );
+
+            if (!filterType) { return; }
+
+            switch (filterType.value) {
+                case 'text': {
+                    const text = await vscode.window.showInputBox({
+                        prompt: 'Filter pull requests',
+                        placeHolder: 'Search by title, author, description, label...',
+                    });
+                    if (text !== undefined) {
+                        prListView.setFilter(text);
+                    }
+                    break;
+                }
+                case 'status': {
+                    const statuses = await vscode.window.showQuickPick(
+                        ['open', 'closed', 'merged', 'draft', 'abandoned'].map(s => ({ label: s, picked: false })),
+                        { canPickMany: true, placeHolder: 'Select statuses to show' }
+                    );
+                    if (statuses) {
+                        prListView.setStatusFilter(statuses.map(s => s.label as PullRequestStatus));
+                    }
+                    break;
+                }
+                case 'userNeed': {
+                    const needs = await vscode.window.showQuickPick(
+                        [
+                            { label: 'blocking', description: 'You are blocking this PR' },
+                            { label: 'required', description: 'Your review is required' },
+                            { label: 'optional', description: 'Your review is optional' },
+                            { label: 'fyi', description: 'FYI only, no action needed' },
+                        ],
+                        { canPickMany: true, placeHolder: 'Select user need levels to show' }
+                    );
+                    if (needs) {
+                        prListView.setUserNeedFilter(needs.map(n => n.label as UserNeedLevel));
+                    }
+                    break;
+                }
+                case 'priority': {
+                    const priorities = await vscode.window.showQuickPick(
+                        ['blocking', 'yes', 'interest', 'no'].map(p => ({ label: p })),
+                        { canPickMany: true, placeHolder: 'Select priorities to show' }
+                    );
+                    if (priorities) {
+                        prListView.setPriorityFilter(priorities.map(p => p.label as ReviewPriority));
+                    }
+                    break;
+                }
+                case 'clear':
+                    prListView.setFilter('');
+                    prListView.setStatusFilter([]);
+                    prListView.setUserNeedFilter([]);
+                    prListView.setPriorityFilter([]);
+                    break;
             }
         }),
 

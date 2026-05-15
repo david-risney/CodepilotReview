@@ -35,6 +35,7 @@ suite('Extension', () => {
             'codepilotReview.openConfig',
             'codepilotReview.viewDiff',
             'codepilotReview.generateParsePattern',
+            'codepilotReview.createIssue',
         ];
 
         for (const cmd of expectedCommands) {
@@ -72,5 +73,41 @@ suite('Extension', () => {
         const containers = pkg.contributes.viewsContainers.activitybar;
         assert.ok(containers.length > 0);
         assert.strictEqual(containers[0].id, 'codepilotReview');
+    });
+
+    test('package.json menus reference existing commands', () => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const pkg = require('../../../package.json');
+        const commands: string[] = pkg.contributes.commands.map((c: any) => c.command);
+        const menus = pkg.contributes.menus;
+
+        for (const [location, items] of Object.entries(menus)) {
+            for (const item of items as any[]) {
+                assert.ok(
+                    commands.includes(item.command),
+                    `Menu item ${item.command} in ${location} not found in commands`
+                );
+            }
+        }
+    });
+
+    test('package.json configuration has all provider options', () => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const pkg = require('../../../package.json');
+        const providerProp = pkg.contributes.configuration.properties['codepilotReview.provider'];
+        assert.ok(providerProp);
+        assert.ok(providerProp.enum.includes('local'));
+        assert.ok(providerProp.enum.includes('azureDevOps'));
+        assert.ok(providerProp.enum.includes('github'));
+        assert.ok(providerProp.enum.includes('chromium'));
+    });
+
+    test('all commands have title and category', () => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const pkg = require('../../../package.json');
+        for (const cmd of pkg.contributes.commands) {
+            assert.ok(cmd.title, `Command ${cmd.command} missing title`);
+            assert.ok(cmd.category, `Command ${cmd.command} missing category`);
+        }
     });
 });

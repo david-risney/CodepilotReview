@@ -216,7 +216,7 @@ function mapAdoPullRequest(pr: any, providerName: string, webBaseUrl: string): P
         updatedAt: new Date(pr.closedDate ?? pr.creationDate),
         reviewers,
         labels: (pr.labels ?? []).map((l: any) => l.name ?? ''),
-        isUserRequired: reviewers.some((r: any) => r.isRequired),
+        userNeed: reviewers.some((r: any) => r.isRequired) ? 'required' : 'optional',
         providerName,
     };
 }

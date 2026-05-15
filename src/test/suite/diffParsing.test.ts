@@ -72,4 +72,30 @@ suite('Diff Parsing', () => {
         assert.strictEqual(result!.newStart, 5678);
         assert.strictEqual(result!.newLines, 200);
     });
+
+    test('parse hunk header with zero lines', () => {
+        const result = parseHunkHeader('@@ -1,0 +1,3 @@');
+        assert.ok(result);
+        assert.strictEqual(result!.oldLines, 0);
+        assert.strictEqual(result!.newLines, 3);
+    });
+
+    test('parse hunk header preserves full header text', () => {
+        const result = parseHunkHeader('@@ -10,5 +20,8 @@ export class MyService {');
+        assert.ok(result);
+        assert.strictEqual(result!.header, 'export class MyService {');
+    });
+
+    test('detect copied file falls back to modified', () => {
+        assert.strictEqual(detectChangeType('copy from old.ts\ncopy to new.ts'), 'modified');
+    });
+
+    test('detect change type with multiple indicators picks first', () => {
+        // new file takes precedence since it's checked first
+        assert.strictEqual(detectChangeType('new file mode 100644\nrename from x'), 'added');
+    });
+
+    test('detect change type with empty string', () => {
+        assert.strictEqual(detectChangeType(''), 'modified');
+    });
 });

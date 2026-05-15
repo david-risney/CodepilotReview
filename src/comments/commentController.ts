@@ -10,6 +10,7 @@ import { logger } from '../logging/logger';
 export class ReviewCommentController {
     private commentController: vscode.CommentController;
     private threads: Map<string, vscode.CommentThread> = new Map();
+    private isLocalProvider: boolean = true;
 
     constructor(private sessionService: ReviewSessionService) {
         this.commentController = vscode.comments.createCommentController(
@@ -19,10 +20,19 @@ export class ReviewCommentController {
 
         this.commentController.commentingRangeProvider = {
             provideCommentingRanges: (_document: vscode.TextDocument) => {
-                // Allow commenting on any line
+                // Only allow creating new comment threads for local providers (read/write)
+                // Remote providers show existing issues read-only
+                if (!this.isLocalProvider) {
+                    return [];
+                }
                 return [new vscode.Range(0, 0, _document.lineCount - 1, 0)];
             },
         };
+    }
+
+    /** Set whether the current provider is local (read/write) or remote (read-only) */
+    setLocalProvider(isLocal: boolean): void {
+        this.isLocalProvider = isLocal;
     }
 
     /** Display review issues as inline comments */

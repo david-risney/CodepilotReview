@@ -18,7 +18,7 @@ suite('PullRequestService', () => {
             updatedAt: new Date('2024-01-02'),
             reviewers: [{ name: 'bob', id: 'bob', isRequired: true }],
             labels: ['bug', 'urgent'],
-            isUserRequired: true,
+            userNeed: 'blocking',
             priority: 'blocking',
             providerName: 'local',
         },
@@ -34,7 +34,7 @@ suite('PullRequestService', () => {
             updatedAt: new Date('2024-01-04'),
             reviewers: [],
             labels: ['feature'],
-            isUserRequired: false,
+            userNeed: 'fyi',
             priority: 'interest',
             providerName: 'local',
         },
@@ -50,7 +50,7 @@ suite('PullRequestService', () => {
             updatedAt: new Date('2024-01-06'),
             reviewers: [{ name: 'carol', id: 'carol', isRequired: false }],
             labels: ['refactor'],
-            isUserRequired: false,
+            userNeed: 'optional',
             providerName: 'local',
         },
     ];
@@ -75,8 +75,8 @@ suite('PullRequestService', () => {
         assert.strictEqual(result.length, 2);
     });
 
-    test('filterPullRequests by isUserRequired', () => {
-        const result = service.filterPullRequests(mockPRs, { isUserRequired: true });
+    test('filterPullRequests by userNeed', () => {
+        const result = service.filterPullRequests(mockPRs, { userNeed: ['blocking'] });
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].id, 'pr-1');
     });
