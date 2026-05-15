@@ -2,10 +2,10 @@
   "name": "codepilot-review",
   "displayName": "CodepilotReview",
   "description": "VSCode extension for using Copilot to help with manual code review",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "codepilot-review",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "Other"
@@ -22,21 +22,113 @@
       {
         "command": "codepilotReview.refreshPRs",
         "title": "Refresh Pull Requests",
-        "category": "CodepilotReview"
+        "category": "CodepilotReview",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codepilotReview.filterPRs",
+        "title": "Filter Pull Requests",
+        "category": "CodepilotReview",
+        "icon": "$(filter)"
       },
       {
         "command": "codepilotReview.runReviewTools",
         "title": "Run Review Tools",
-        "category": "CodepilotReview"
+        "category": "CodepilotReview",
+        "icon": "$(play)"
       },
       {
         "command": "codepilotReview.publishDraftComments",
         "title": "Publish Draft Comments",
-        "category": "CodepilotReview"
+        "category": "CodepilotReview",
+        "icon": "$(cloud-upload)"
       },
       {
         "command": "codepilotReview.selectProvider",
         "title": "Select Code Review Provider",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.acceptIssue",
+        "title": "Accept as Draft",
+        "category": "CodepilotReview",
+        "icon": "$(check)"
+      },
+      {
+        "command": "codepilotReview.dismissIssue",
+        "title": "Dismiss Issue",
+        "category": "CodepilotReview",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codepilotReview.challengeIssue",
+        "title": "Really? (Challenge Issue)",
+        "category": "CodepilotReview",
+        "icon": "$(question)"
+      },
+      {
+        "command": "codepilotReview.fixIssue",
+        "title": "Fix Issue",
+        "category": "CodepilotReview",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "codepilotReview.goToIssue",
+        "title": "Go to Issue Location",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.partitionByDependency",
+        "title": "Partition by Dependency",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.partitionByOwnership",
+        "title": "Partition by Ownership",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.partitionCustom",
+        "title": "Custom Partition...",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.startTour",
+        "title": "Start Code Tour",
+        "category": "CodepilotReview",
+        "icon": "$(play)"
+      },
+      {
+        "command": "codepilotReview.nextTourStep",
+        "title": "Next Tour Step",
+        "category": "CodepilotReview",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "codepilotReview.prevTourStep",
+        "title": "Previous Tour Step",
+        "category": "CodepilotReview",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "codepilotReview.suggestReviewers",
+        "title": "Suggest Reviewers",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.openChat",
+        "title": "Chat About Change",
+        "category": "CodepilotReview",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "codepilotReview.signIn",
+        "title": "Sign In",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.signOut",
+        "title": "Sign Out",
         "category": "CodepilotReview"
       }
     ],
@@ -58,6 +150,56 @@
         {
           "id": "codepilotReview.reviewIssues",
           "name": "Review Issues"
+        },
+        {
+          "id": "codepilotReview.partitions",
+          "name": "Partitions"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "codepilotReview.refreshPRs",
+          "when": "view == codepilotReview.prList",
+          "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.filterPRs",
+          "when": "view == codepilotReview.prList",
+          "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.runReviewTools",
+          "when": "view == codepilotReview.reviewIssues",
+          "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.publishDraftComments",
+          "when": "view == codepilotReview.reviewIssues",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codepilotReview.acceptIssue",
+          "when": "viewItem =~ /reviewIssue:suggested/",
+          "group": "inline"
+        },
+        {
+          "command": "codepilotReview.dismissIssue",
+          "when": "viewItem =~ /reviewIssue:(suggested|draft)/",
+          "group": "inline"
+        },
+        {
+          "command": "codepilotReview.challengeIssue",
+          "when": "viewItem =~ /reviewIssue:(suggested|draft)/",
+          "group": "1_actions"
+        },
+        {
+          "command": "codepilotReview.fixIssue",
+          "when": "viewItem =~ /reviewIssue:(suggested|draft)/",
+          "group": "1_actions"
         }
       ]
     },
@@ -121,7 +263,7 @@
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.120.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
     "@vscode/test-electron": "^2.3.8",
@@ -129,6 +271,5 @@
     "mocha": "^10.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
-  },
-  "dependencies": {}
+  }
 }
