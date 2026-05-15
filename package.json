@@ -1,0 +1,134 @@
+{
+  "name": "codepilot-review",
+  "displayName": "CodepilotReview",
+  "description": "VSCode extension for using Copilot to help with manual code review",
+  "version": "0.1.0",
+  "publisher": "codepilot-review",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codepilotReview.openReview",
+        "title": "Open Review",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.refreshPRs",
+        "title": "Refresh Pull Requests",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.runReviewTools",
+        "title": "Run Review Tools",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.publishDraftComments",
+        "title": "Publish Draft Comments",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.selectProvider",
+        "title": "Select Code Review Provider",
+        "category": "CodepilotReview"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codepilotReview",
+          "title": "CodepilotReview",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codepilotReview": [
+        {
+          "id": "codepilotReview.prList",
+          "name": "Pull Requests"
+        },
+        {
+          "id": "codepilotReview.reviewIssues",
+          "name": "Review Issues"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "CodepilotReview",
+      "properties": {
+        "codepilotReview.provider": {
+          "type": "string",
+          "default": "local",
+          "enum": [
+            "local",
+            "azureDevOps",
+            "github",
+            "chromium"
+          ],
+          "description": "Code review provider to use"
+        },
+        "codepilotReview.azureDevOps.organization": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps organization URL"
+        },
+        "codepilotReview.azureDevOps.project": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps project name"
+        },
+        "codepilotReview.github.owner": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub repository owner"
+        },
+        "codepilotReview.github.repo": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub repository name"
+        },
+        "codepilotReview.chromium.host": {
+          "type": "string",
+          "default": "https://chromium-review.googlesource.com",
+          "description": "Chromium Gerrit host URL"
+        },
+        "codepilotReview.local.baseBranch": {
+          "type": "string",
+          "default": "main",
+          "description": "Base branch for local diff comparison"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "mocha --require ts-node/register 'src/test/unit/**/*.test.ts'",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.56.0",
+    "mocha": "^10.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {}
+}
