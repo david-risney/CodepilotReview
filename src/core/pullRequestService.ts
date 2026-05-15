@@ -100,6 +100,8 @@ export class PullRequestService {
             return;
         }
 
+        let enrichedAny = false;
+
         for (const pr of prs) {
             // Skip if already enriched
             if (pr.aiSummary) { continue; }
@@ -123,13 +125,17 @@ export class PullRequestService {
                 if (parsed.userNeed) {
                     pr.userNeed = parsed.userNeed;
                 }
+
+                enrichedAny = true;
             } catch (error) {
                 logger.warn(`Failed to enrich PR ${pr.id} with AI info`, error);
             }
         }
 
-        // Notify views that PRs have been enriched with AI info
-        this._onDidEnrich.fire();
+        // Only notify views if at least one PR was actually enriched
+        if (enrichedAny) {
+            this._onDidEnrich.fire();
+        }
     }
 
     private parseSummarizeResponse(response: string): {
