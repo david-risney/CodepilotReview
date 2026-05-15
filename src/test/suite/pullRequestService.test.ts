@@ -21,6 +21,7 @@ suite('PullRequestService', () => {
             userNeed: 'blocking',
             priority: 'blocking',
             providerName: 'local',
+            providerId: 'local',
         },
         {
             id: 'pr-2',
@@ -37,6 +38,7 @@ suite('PullRequestService', () => {
             userNeed: 'fyi',
             priority: 'interest',
             providerName: 'local',
+            providerId: 'local',
         },
         {
             id: 'pr-3',
@@ -52,6 +54,7 @@ suite('PullRequestService', () => {
             labels: ['refactor'],
             userNeed: 'optional',
             providerName: 'local',
+            providerId: 'local',
         },
     ];
 

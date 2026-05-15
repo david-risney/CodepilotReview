@@ -3,7 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import {
     PullRequest, DiffFile, DiffHunk, DiffLine, ReviewIssue, ProviderCapabilities,
-    FileChangeType, ReviewIssueStatus
+    FileChangeType, ReviewIssueStatus, ProviderInstanceConfig
 } from '../types';
 import {
     ICodeReviewProvider, IPullRequestProvider, IDiffProvider, ICommentProvider,
@@ -34,12 +34,14 @@ export class LocalProvider implements ICodeReviewProvider {
     readonly comments: ICommentProvider;
     readonly auth = undefined;
 
+    private instanceConfig: ProviderInstanceConfig | undefined;
     private workspaceRoot: string = '';
     private baseBranch: string = 'main';
     private draftIssues: Map<string, ReviewIssue[]> = new Map();
     private context?: vscode.ExtensionContext;
 
-    constructor() {
+    constructor(instanceConfig?: ProviderInstanceConfig) {
+        this.instanceConfig = instanceConfig;
         this.pullRequests = new LocalPullRequestProvider(this);
         this.diff = new LocalDiffProvider(this);
         this.comments = new LocalCommentProvider(this);
@@ -52,8 +54,12 @@ export class LocalProvider implements ICodeReviewProvider {
             this.workspaceRoot = folders[0].uri.fsPath;
         }
 
-        const config = vscode.workspace.getConfiguration('codepilotReview');
-        this.baseBranch = config.get<string>('local.baseBranch', 'main');
+        if (this.instanceConfig?.baseBranch) {
+            this.baseBranch = this.instanceConfig.baseBranch;
+        } else {
+            const config = vscode.workspace.getConfiguration('codepilotReview');
+            this.baseBranch = config.get<string>('local.baseBranch', 'main');
+        }
 
         // Restore draft issues from workspace storage
         const stored = context.workspaceState.get<Record<string, ReviewIssue[]>>('localDraftIssues');
@@ -83,6 +89,10 @@ export class LocalProvider implements ICodeReviewProvider {
 
     getBaseBranch(): string {
         return this.baseBranch;
+    }
+
+    getInstanceId(): string {
+        return this.instanceConfig?.id || this.name;
     }
 
     async runGit(args: string): Promise<string> {
@@ -143,6 +153,7 @@ class LocalPullRequestProvider implements IPullRequestProvider {
                 labels: [],
                 userNeed: 'required',
                 providerName: 'local',
+                providerId: this.provider.getInstanceId(),
             };
 
             return [pr];

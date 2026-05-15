@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as https from 'https';
 import {
     PullRequest, DiffFile, DiffHunk, DiffLine, ReviewIssue, ProviderCapabilities,
-    ReviewIssueStatus, FileChangeType, Reviewer
+    ReviewIssueStatus, FileChangeType, Reviewer, ProviderInstanceConfig
 } from '../types';
 import {
     ICodeReviewProvider, IPullRequestProvider, IDiffProvider, ICommentProvider,
@@ -182,7 +182,7 @@ async function requireToken(): Promise<string> {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-function mapPullRequest(pr: any, providerName: string): PullRequest {
+function mapPullRequest(pr: any, providerName: string, providerId: string): PullRequest {
     const isDraft: boolean = pr.draft === true;
     let status: PullRequest['status'];
     if (isDraft) {
@@ -217,6 +217,7 @@ function mapPullRequest(pr: any, providerName: string): PullRequest {
         labels: (pr.labels ?? []).map((l: any) => l.name ?? l),
         userNeed: 'optional',
         providerName,
+        providerId,
     };
 }
 
@@ -329,10 +330,12 @@ export class GitHubProvider implements ICodeReviewProvider {
     readonly comments: ICommentProvider;
     readonly auth: IAuthProvider;
 
+    private instanceConfig: ProviderInstanceConfig | undefined;
     private owner: string = '';
     private repo: string = '';
 
-    constructor() {
+    constructor(instanceConfig?: ProviderInstanceConfig) {
+        this.instanceConfig = instanceConfig;
         this.pullRequests = new GitHubPullRequestProvider(this);
         this.diff = new GitHubDiffProvider(this);
         this.comments = new GitHubCommentProvider(this);
@@ -340,9 +343,14 @@ export class GitHubProvider implements ICodeReviewProvider {
     }
 
     async initialize(_context: vscode.ExtensionContext): Promise<void> {
-        const config = vscode.workspace.getConfiguration('codepilotReview');
-        this.owner = config.get<string>('github.owner', '');
-        this.repo = config.get<string>('github.repo', '');
+        if (this.instanceConfig) {
+            this.owner = this.instanceConfig.owner || '';
+            this.repo = this.instanceConfig.repo || '';
+        } else {
+            const config = vscode.workspace.getConfiguration('codepilotReview');
+            this.owner = config.get<string>('github.owner', '');
+            this.repo = config.get<string>('github.repo', '');
+        }
 
         if (!this.owner || !this.repo) {
             logger.warn('GitHub owner and repo must be configured');
@@ -357,6 +365,7 @@ export class GitHubProvider implements ICodeReviewProvider {
 
     getOwner(): string { return this.owner; }
     getRepo(): string { return this.repo; }
+    getInstanceId(): string { return this.instanceConfig?.id || this.name; }
 }
 
 // ── Pull Requests ──────────────────────────────────────────────────────
@@ -415,7 +424,7 @@ class GitHubPullRequestProvider implements IPullRequestProvider {
         }
 
         logger.info(`GitHub getPullRequests: found ${prs.length} PRs`);
-        return prs.map((pr: any) => mapPullRequest(pr, this.provider.name));
+        return prs.map((pr: any) => mapPullRequest(pr, this.provider.name, this.provider.getInstanceId()));
     }
 
     async getPullRequest(id: string): Promise<PullRequest | undefined> {
@@ -428,7 +437,7 @@ class GitHubPullRequestProvider implements IPullRequestProvider {
                 `/repos/${owner}/${repo}/pulls/${id}`,
                 token,
             );
-            return mapPullRequest(resp.data, this.provider.name);
+            return mapPullRequest(resp.data, this.provider.name, this.provider.getInstanceId());
         } catch (err) {
             if (err instanceof ProviderError && err.message.includes('not found')) {
                 return undefined;

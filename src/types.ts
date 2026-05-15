@@ -36,8 +36,10 @@ export interface PullRequest {
     aiSummary?: string;
     /** Relevant links (other PRs, bugs, etc.) */
     relevantLinks?: RelevantLink[];
-    /** Provider name that sourced this PR */
+    /** Provider name that sourced this PR (provider type for display) */
     providerName: string;
+    /** Unique provider instance ID (for routing back to correct provider) */
+    providerId: string;
 }
 
 export type PullRequestStatus = 'open' | 'closed' | 'merged' | 'draft' | 'abandoned';
@@ -213,4 +215,30 @@ export interface ProviderCapabilities {
     supportsReviewVotes: boolean;
     supportsLabels: boolean;
     requiresAuthentication: boolean;
+}
+
+// --- Multi-Provider Configuration ---
+
+export type ProviderType = 'local' | 'azureDevOps' | 'github' | 'chromium';
+
+/** Configuration for a single provider instance */
+export interface ProviderInstanceConfig {
+    /** Unique identifier for this provider instance */
+    id: string;
+    /** Display label shown in UI */
+    label: string;
+    /** Provider type */
+    type: ProviderType;
+    // ADO-specific
+    organization?: string;
+    project?: string;
+    repositoryId?: string;
+    pat?: string;
+    // GitHub-specific
+    owner?: string;
+    repo?: string;
+    // Chromium-specific
+    host?: string;
+    // Local-specific
+    baseBranch?: string;
 }

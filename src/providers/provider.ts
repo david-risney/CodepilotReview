@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import {
-    PullRequest, DiffFile, ReviewIssue, ProviderCapabilities, ReviewIssueStatus
+    PullRequest, DiffFile, ReviewIssue, ProviderCapabilities, ReviewIssueStatus, ProviderType
 } from '../types';
 
 /**
@@ -83,4 +83,16 @@ export interface ICodeReviewProvider {
     initialize(context: vscode.ExtensionContext): Promise<void>;
     /** Dispose of provider resources */
     dispose(): void;
+}
+
+/** Wraps an ICodeReviewProvider with instance metadata for multi-provider support */
+export interface ProviderInstance {
+    /** Unique identifier for this provider instance */
+    id: string;
+    /** Display label shown in UI */
+    displayName: string;
+    /** Provider type */
+    type: ProviderType;
+    /** The actual provider implementation */
+    provider: ICodeReviewProvider;
 }

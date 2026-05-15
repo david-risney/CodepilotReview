@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
     PullRequest, DiffFile, DiffHunk, DiffLine, ReviewIssue, ProviderCapabilities,
-    ReviewIssueStatus, Reviewer, ReviewVote
+    ReviewIssueStatus, Reviewer, ReviewVote, ProviderInstanceConfig
 } from '../types';
 import {
     ICodeReviewProvider, IPullRequestProvider, IDiffProvider, ICommentProvider,
@@ -262,12 +262,14 @@ export class ChromiumProvider implements ICodeReviewProvider {
     readonly comments: ICommentProvider;
     readonly auth: IAuthProvider;
 
+    private instanceConfig: ProviderInstanceConfig | undefined;
     private host: string = 'https://chromium-review.googlesource.com';
     private credentials: GerritCredentials | undefined;
     private cookie: string | undefined;
     private secretStorage: vscode.SecretStorage | undefined;
 
-    constructor() {
+    constructor(instanceConfig?: ProviderInstanceConfig) {
+        this.instanceConfig = instanceConfig;
         this.pullRequests = new ChromiumPullRequestProvider(this);
         this.diff = new ChromiumDiffProvider(this);
         this.comments = new ChromiumCommentProvider(this);
@@ -275,8 +277,12 @@ export class ChromiumProvider implements ICodeReviewProvider {
     }
 
     async initialize(context: vscode.ExtensionContext): Promise<void> {
-        const config = vscode.workspace.getConfiguration('codepilotReview');
-        this.host = config.get<string>('chromium.host', this.host);
+        if (this.instanceConfig?.host) {
+            this.host = this.instanceConfig.host;
+        } else {
+            const config = vscode.workspace.getConfiguration('codepilotReview');
+            this.host = config.get<string>('chromium.host', this.host);
+        }
         this.secretStorage = context.secrets;
 
         // Try to restore credentials from SecretStorage
@@ -309,6 +315,7 @@ export class ChromiumProvider implements ICodeReviewProvider {
     }
 
     getHost(): string { return this.host; }
+    getInstanceId(): string { return this.instanceConfig?.id || this.name; }
 
     /** Build a URL path for authenticated API calls (/a/ prefix). */
     buildApiUrl(apiPath: string): string {
@@ -496,6 +503,7 @@ class ChromiumPullRequestProvider implements IPullRequestProvider {
             labels,
             userNeed: 'optional',
             providerName: 'chromium',
+            providerId: this.provider.getInstanceId(),
         };
     }
 }

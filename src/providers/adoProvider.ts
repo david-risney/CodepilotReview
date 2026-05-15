@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as https from 'https';
 import {
     PullRequest, DiffFile, DiffHunk, DiffLine, ReviewIssue, ProviderCapabilities,
-    ReviewIssueStatus, ReviewVote, FileChangeType
+    ReviewIssueStatus, ReviewVote, FileChangeType, ProviderInstanceConfig
 } from '../types';
 import {
     ICodeReviewProvider, IPullRequestProvider, IDiffProvider, ICommentProvider,
@@ -195,7 +195,7 @@ function statusFilterToAdoStatus(statuses?: string[]): string | undefined {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapAdoPullRequest(pr: any, providerName: string, webBaseUrl: string): PullRequest {
+function mapAdoPullRequest(pr: any, providerName: string, providerId: string, webBaseUrl: string): PullRequest {
     const reviewers = (pr.reviewers ?? []).map((r: any) => ({
         name: r.displayName ?? r.uniqueName ?? '',
         id: r.id ?? '',
@@ -218,6 +218,7 @@ function mapAdoPullRequest(pr: any, providerName: string, webBaseUrl: string): P
         labels: (pr.labels ?? []).map((l: any) => l.name ?? ''),
         userNeed: reviewers.some((r: any) => r.isRequired) ? 'required' : 'optional',
         providerName,
+        providerId,
     };
 }
 
@@ -240,6 +241,7 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
     readonly comments: ICommentProvider;
     readonly auth: IAuthProvider;
 
+    private instanceConfig: ProviderInstanceConfig | undefined;
     private organization = '';
     private project = '';
     private repositoryId = '';
@@ -247,7 +249,8 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
     private isPat = false;
     private currentUser = '';
 
-    constructor() {
+    constructor(instanceConfig?: ProviderInstanceConfig) {
+        this.instanceConfig = instanceConfig;
         this.pullRequests = new AdoPullRequestProvider(this);
         this.diff = new AdoDiffProvider(this);
         this.comments = new AdoCommentProvider(this);
@@ -266,13 +269,18 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
     // ── Internal accessors ──────────────────────────────────────────────────
 
     loadConfig(): void {
-        const config = vscode.workspace.getConfiguration('codepilotReview');
-        this.organization = config.get<string>('azureDevOps.organization', '');
-        this.project = config.get<string>('azureDevOps.project', '');
-        this.repositoryId = config.get<string>('azureDevOps.repositoryId', '');
+        if (this.instanceConfig) {
+            this.organization = this.instanceConfig.organization || '';
+            this.project = this.instanceConfig.project || '';
+            this.repositoryId = this.instanceConfig.repositoryId || '';
+        } else {
+            const config = vscode.workspace.getConfiguration('codepilotReview');
+            this.organization = config.get<string>('azureDevOps.organization', '');
+            this.project = config.get<string>('azureDevOps.project', '');
+            this.repositoryId = config.get<string>('azureDevOps.repositoryId', '');
+        }
 
         if (!this.repositoryId) {
-            // Try to infer from git remote
             this.repositoryId = this.inferRepoFromGitRemote();
         }
 
@@ -308,6 +316,7 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
     getOrganization(): string { return this.organization; }
     getProject(): string { return this.project; }
     getRepositoryId(): string { return this.repositoryId; }
+    getInstanceId(): string { return this.instanceConfig?.id || this.name; }
 
     /** Base URL for ADO REST API. */
     getApiBaseUrl(): string {
@@ -329,9 +338,9 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
             return { token: this.token, isPat: this.isPat };
         }
 
-        // Try PAT from config first
-        const config = vscode.workspace.getConfiguration('codepilotReview');
-        const pat = config.get<string>('azureDevOps.pat', '');
+        // Try PAT from instance config first, then vscode settings
+        const pat = this.instanceConfig?.pat
+            || vscode.workspace.getConfiguration('codepilotReview').get<string>('azureDevOps.pat', '');
         if (pat) {
             this.token = pat;
             this.isPat = true;
@@ -400,7 +409,7 @@ class AdoPullRequestProvider implements IPullRequestProvider {
         );
 
         const webBase = this.provider.getWebBaseUrl();
-        let results = prs.map((pr: any) => mapAdoPullRequest(pr, this.provider.name, webBase));
+        let results = prs.map((pr: any) => mapAdoPullRequest(pr, this.provider.name, this.provider.getInstanceId(), webBase));
 
         // Client-side filtering for fields ADO search doesn't support
         if (filter) {
@@ -414,7 +423,7 @@ class AdoPullRequestProvider implements IPullRequestProvider {
         const repoPath = this.provider.getGitRepoPath();
         try {
             const pr = await this.provider.apiRequest<any>(`${repoPath}/pullrequests/${id}`);
-            return mapAdoPullRequest(pr, this.provider.name, this.provider.getWebBaseUrl());
+            return mapAdoPullRequest(pr, this.provider.name, this.provider.getInstanceId(), this.provider.getWebBaseUrl());
         } catch (e) {
             logger.error(`ADO: failed to get PR ${id}`, e);
             return undefined;

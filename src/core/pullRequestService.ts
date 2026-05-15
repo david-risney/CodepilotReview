@@ -1,54 +1,94 @@
 import * as vscode from 'vscode';
 import { PullRequest, PullRequestStatus, ReviewPriority, UserNeedLevel } from '../types';
-import { ICodeReviewProvider, PullRequestFilter } from '../providers/provider';
+import { ICodeReviewProvider, PullRequestFilter, ProviderInstance } from '../providers/provider';
 import { IAiService } from '../ai/aiService';
 import { logger } from '../logging/logger';
 
 /**
  * Service layer for pull request operations.
- * Coordinates between providers and UI.
+ * Coordinates between multiple providers and UI.
  */
 export class PullRequestService {
-    private provider: ICodeReviewProvider | undefined;
+    private providers: ProviderInstance[] = [];
     private aiService: IAiService | undefined;
-    private cachedPRs: PullRequest[] = [];
+    private cachedPRs = new Map<string, PullRequest[]>();
 
     private _onDidEnrich = new vscode.EventEmitter<void>();
     readonly onDidEnrich = this._onDidEnrich.event;
 
+    /** @deprecated Use setProviders() for multi-provider support */
     setProvider(provider: ICodeReviewProvider): void {
-        this.provider = provider;
-        this.cachedPRs = [];
+        this.providers = [{
+            id: provider.name,
+            displayName: provider.name,
+            type: provider.name as any,
+            provider,
+        }];
+        this.cachedPRs.clear();
+    }
+
+    setProviders(providers: ProviderInstance[]): void {
+        this.providers = providers;
+        this.cachedPRs.clear();
     }
 
     setAiService(aiService: IAiService): void {
         this.aiService = aiService;
     }
 
+    /** Get the provider instance for a given provider ID */
+    getProviderById(id: string): ProviderInstance | undefined {
+        return this.providers.find(p => p.id === id);
+    }
+
     async getPullRequests(filter?: PullRequestFilter): Promise<PullRequest[]> {
-        if (!this.provider) {
-            logger.warn('No provider set');
+        if (this.providers.length === 0) {
+            logger.warn('No providers set');
             return [];
         }
 
-        try {
-            this.cachedPRs = await this.provider.pullRequests.getPullRequests(filter);
+        // Fetch from all providers in parallel, tolerating individual failures
+        const results = await Promise.allSettled(
+            this.providers.map(async (instance) => {
+                try {
+                    const prs = await instance.provider.pullRequests.getPullRequests(filter);
+                    this.cachedPRs.set(instance.id, prs);
+                    return prs;
+                } catch (error) {
+                    logger.error(`Failed to fetch PRs from provider "${instance.id}"`, error);
+                    // Return cached PRs for this provider on failure
+                    return this.cachedPRs.get(instance.id) || [];
+                }
+            }),
+        );
 
-            // Enrich PRs with AI-generated info in background
-            this.enrichPrsWithAi(this.cachedPRs);
-
-            return this.cachedPRs;
-        } catch (error) {
-            logger.error('Failed to fetch pull requests', error);
-            return this.cachedPRs;
+        const allPRs: PullRequest[] = [];
+        for (const result of results) {
+            if (result.status === 'fulfilled') {
+                allPRs.push(...result.value);
+            }
         }
+
+        // Enrich PRs with AI-generated info in background
+        this.enrichPrsWithAi(allPRs);
+
+        return allPRs;
     }
 
-    async getPullRequest(id: string): Promise<PullRequest | undefined> {
-        if (!this.provider) {
-            return undefined;
+    async getPullRequest(id: string, providerId?: string): Promise<PullRequest | undefined> {
+        // If providerId is given, look up only that provider
+        if (providerId) {
+            const instance = this.providers.find(p => p.id === providerId);
+            if (instance) {
+                return instance.provider.pullRequests.getPullRequest(id);
+            }
         }
-        return this.provider.pullRequests.getPullRequest(id);
+        // Otherwise search all providers
+        for (const instance of this.providers) {
+            const pr = await instance.provider.pullRequests.getPullRequest(id);
+            if (pr) { return pr; }
+        }
+        return undefined;
     }
 
     /**
@@ -65,7 +105,11 @@ export class PullRequestService {
             if (pr.aiSummary) { continue; }
 
             try {
-                const diff = await this.provider?.diff.getDiff(pr.id);
+                // Look up the correct provider for this PR
+                const instance = this.providers.find(p => p.id === pr.providerId);
+                if (!instance) { continue; }
+
+                const diff = await instance.provider.diff.getDiff(pr.id);
                 if (!diff || diff.length === 0) { continue; }
 
                 const response = await this.aiService.summarizeDiff(diff);

@@ -285,6 +285,58 @@
           "type": "string",
           "default": "main",
           "description": "Base branch for local diff comparison"
+        },
+        "codepilotReview.providers": {
+          "type": "array",
+          "default": [],
+          "description": "Multiple provider instances to run simultaneously. Each entry configures one provider. When non-empty, this overrides the single 'provider' setting above.",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "type"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier for this provider instance (e.g. 'github-work', 'ado-team-a')"
+              },
+              "label": {
+                "type": "string",
+                "description": "Display label shown in the PR list (e.g. 'Work GitHub', 'Team A ADO')"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["local", "azureDevOps", "github", "chromium"],
+                "description": "Provider type"
+              },
+              "organization": {
+                "type": "string",
+                "description": "(ADO) Azure DevOps organization"
+              },
+              "project": {
+                "type": "string",
+                "description": "(ADO) Azure DevOps project name"
+              },
+              "repositoryId": {
+                "type": "string",
+                "description": "(ADO) Azure DevOps repository ID or name"
+              },
+              "owner": {
+                "type": "string",
+                "description": "(GitHub) Repository owner"
+              },
+              "repo": {
+                "type": "string",
+                "description": "(GitHub) Repository name"
+              },
+              "host": {
+                "type": "string",
+                "description": "(Chromium) Gerrit host URL"
+              },
+              "baseBranch": {
+                "type": "string",
+                "description": "(Local) Base branch for diff comparison"
+              }
+            }
+          }
         }
       }
     }

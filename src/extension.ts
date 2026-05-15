@@ -1,11 +1,7 @@
 import * as vscode from 'vscode';
 import { ReviewIssue, PullRequestStatus, ReviewPriority, UserNeedLevel } from './types';
 import { Configuration } from './config/configuration';
-import { LocalProvider } from './providers/localProvider';
-import { AzureDevOpsProvider } from './providers/adoProvider';
-import { GitHubProvider } from './providers/githubProvider';
-import { ChromiumProvider } from './providers/chromiumProvider';
-import { ICodeReviewProvider } from './providers/provider';
+import { ProviderManager } from './providers/providerManager';
 import { PullRequestService } from './core/pullRequestService';
 import { ReviewSessionService } from './core/reviewSessionService';
 import { PartitionService } from './core/partitionService';
@@ -23,8 +19,6 @@ import { AuthManager } from './auth/authManager';
 import { CopilotAiService, StubAiService, IAiService } from './ai/aiService';
 import { CodepilotReviewError } from './errors';
 import { logger } from './logging/logger';
-
-let currentProvider: ICodeReviewProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     logger.info('CodepilotReview extension activating...');
@@ -115,43 +109,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         logger.error('Command error', error);
     };
 
-    // Provider factory
-    const createProvider = (name: string): ICodeReviewProvider => {
-        switch (name) {
-            case 'azureDevOps': return new AzureDevOpsProvider();
-            case 'github': return new GitHubProvider();
-            case 'chromium': return new ChromiumProvider();
-            case 'local':
-            default: return new LocalProvider();
-        }
-    };
+    // Initialize provider manager
+    const providerManager = new ProviderManager();
+    providerManager.setContext(context);
+    providerManager.setAuthManager(authManager);
+    context.subscriptions.push({ dispose: () => providerManager.dispose() });
 
-    // Initialize provider
-    const initProvider = async (providerName: string): Promise<void> => {
-        if (currentProvider) {
-            currentProvider.dispose();
-        }
+    // Wire provider lookups into services
+    const providerLookup = (id: string) => providerManager.getProvider(id);
+    sessionService.setProviderLookup(providerLookup);
+    diffContentProvider.setProviderLookup(providerLookup);
 
-        currentProvider = createProvider(providerName);
-        await currentProvider.initialize(context);
-
-        // Check auth if needed
-        if (currentProvider.capabilities.requiresAuthentication) {
-            await authManager.ensureAuthenticated(currentProvider.name, currentProvider.auth);
-        }
-
-        prService.setProvider(currentProvider);
-        sessionService.setProvider(currentProvider);
-        diffContentProvider.setProvider(currentProvider);
-        commentController.setLocalProvider(providerName === 'local');
-
+    // Sync providers to services when they change
+    const syncProviders = () => {
+        const instances = providerManager.getAllProviders();
+        prService.setProviders(instances);
+        // Comment controller: allow local commenting if any provider is local type
+        commentController.setLocalProvider(instances.some(p => p.type === 'local'));
         prListView.refresh();
-        logger.info(`Provider set to: ${currentProvider.name}`);
     };
+    providerManager.onDidChangeProviders(syncProviders);
 
-    // Set initial provider
-    const initialProvider = config.getConfig().provider;
-    await initProvider(initialProvider);
+    // Initialize providers from config
+    await providerManager.initializeFromConfig();
+    syncProviders();
 
     // Register commands
     context.subscriptions.push(
@@ -162,7 +143,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 return;
             }
             try {
-                await sessionService.openReview(pr.id);
+                await sessionService.openReview(pr);
                 await store.addReviewedPrId(pr.id);
                 const issues = sessionService.getIssues();
                 const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -179,20 +160,98 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
 
         vscode.commands.registerCommand('codepilotReview.selectProvider', async () => {
-            const items = [
-                { label: 'Local', description: 'Git diff based review', value: 'local' },
-                { label: 'Azure DevOps', description: 'ADO pull requests', value: 'azureDevOps' },
-                { label: 'GitHub', description: 'GitHub pull requests', value: 'github' },
-                { label: 'Chromium', description: 'Gerrit code review', value: 'chromium' },
-            ];
+            const action = await vscode.window.showQuickPick(
+                [
+                    { label: '$(add) Add Provider', description: 'Add a new provider instance', value: 'add' },
+                    { label: '$(trash) Remove Provider', description: 'Remove an active provider', value: 'remove' },
+                    { label: '$(refresh) Reload All', description: 'Reinitialize from settings', value: 'reload' },
+                ],
+                { placeHolder: 'Manage code review providers' },
+            );
 
-            const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select code review provider',
-            });
+            if (!action) { return; }
 
-            if (selected) {
-                await initProvider(selected.value);
-                vscode.window.showInformationMessage(`Switched to ${selected.label} provider`);
+            switch (action.value) {
+                case 'add': {
+                    const typeItems = [
+                        { label: 'Local', description: 'Git diff based review', value: 'local' as const },
+                        { label: 'Azure DevOps', description: 'ADO pull requests', value: 'azureDevOps' as const },
+                        { label: 'GitHub', description: 'GitHub pull requests', value: 'github' as const },
+                        { label: 'Chromium', description: 'Gerrit code review', value: 'chromium' as const },
+                    ];
+                    const type = await vscode.window.showQuickPick(typeItems, { placeHolder: 'Provider type' });
+                    if (!type) { return; }
+
+                    const id = await vscode.window.showInputBox({
+                        prompt: 'Unique ID for this provider instance',
+                        placeHolder: `e.g. ${type.value}-myproject`,
+                        validateInput: (v) => {
+                            if (!v.trim()) { return 'ID is required'; }
+                            if (providerManager.getProvider(v.trim())) { return 'ID already in use'; }
+                            return undefined;
+                        },
+                    });
+                    if (!id) { return; }
+
+                    const label = await vscode.window.showInputBox({
+                        prompt: 'Display label for this provider',
+                        placeHolder: `e.g. My ${type.label} Project`,
+                        value: `${type.label} (${id})`,
+                    });
+                    if (!label) { return; }
+
+                    const cfg: any = { id: id.trim(), label, type: type.value };
+
+                    // Collect type-specific fields
+                    if (type.value === 'azureDevOps') {
+                        cfg.organization = await vscode.window.showInputBox({ prompt: 'ADO Organization' }) || '';
+                        cfg.project = await vscode.window.showInputBox({ prompt: 'ADO Project' }) || '';
+                    } else if (type.value === 'github') {
+                        cfg.owner = await vscode.window.showInputBox({ prompt: 'GitHub owner (user/org)' }) || '';
+                        cfg.repo = await vscode.window.showInputBox({ prompt: 'GitHub repo name' }) || '';
+                    } else if (type.value === 'chromium') {
+                        cfg.host = await vscode.window.showInputBox({
+                            prompt: 'Gerrit host URL',
+                            value: 'https://chromium-review.googlesource.com',
+                        }) || '';
+                    } else if (type.value === 'local') {
+                        cfg.baseBranch = await vscode.window.showInputBox({
+                            prompt: 'Base branch',
+                            value: 'main',
+                        }) || 'main';
+                    }
+
+                    try {
+                        await providerManager.addProvider(cfg);
+                        syncProviders();
+                        vscode.window.showInformationMessage(`Added provider "${label}"`);
+                    } catch (error) {
+                        showError(error);
+                    }
+                    break;
+                }
+                case 'remove': {
+                    const active = providerManager.getAllProviders();
+                    if (active.length === 0) {
+                        vscode.window.showInformationMessage('No active providers');
+                        return;
+                    }
+                    const toRemove = await vscode.window.showQuickPick(
+                        active.map(p => ({ label: p.displayName, description: `(${p.type}) ${p.id}`, value: p.id })),
+                        { placeHolder: 'Select provider to remove' },
+                    );
+                    if (toRemove) {
+                        providerManager.removeProvider(toRemove.value);
+                        syncProviders();
+                        vscode.window.showInformationMessage(`Removed provider "${toRemove.label}"`);
+                    }
+                    break;
+                }
+                case 'reload':
+                    await providerManager.initializeFromConfig();
+                    syncProviders();
+                    vscode.window.showInformationMessage('Providers reloaded from settings');
+                    break;
             }
         }),
 
@@ -203,6 +262,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     { label: '$(filter) Status', description: 'Filter by PR status', value: 'status' },
                     { label: '$(person) User Need', description: 'Filter by how much your attention is needed', value: 'userNeed' },
                     { label: '$(arrow-up) Priority', description: 'Filter by AI-assessed priority', value: 'priority' },
+                    { label: '$(plug) Provider', description: 'Filter by provider instance', value: 'provider' },
                     { label: '$(close) Clear Filters', description: 'Remove all filters', value: 'clear' },
                 ],
                 { placeHolder: 'Choose filter type' }
@@ -261,7 +321,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     prListView.setStatusFilter([]);
                     prListView.setUserNeedFilter([]);
                     prListView.setPriorityFilter([]);
+                    prListView.setProviderFilter([]);
                     break;
+                case 'provider': {
+                    const active = providerManager.getAllProviders();
+                    if (active.length <= 1) {
+                        vscode.window.showInformationMessage('Only one provider is active');
+                        return;
+                    }
+                    const selected = await vscode.window.showQuickPick(
+                        active.map(p => ({ label: p.displayName, description: p.id, picked: false })),
+                        { canPickMany: true, placeHolder: 'Select providers to show' }
+                    );
+                    if (selected) {
+                        prListView.setProviderFilter(selected.map(s => s.description!));
+                    }
+                    break;
+                }
             }
         }),
 
@@ -653,16 +729,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         // --- Auth Commands ---
         vscode.commands.registerCommand('codepilotReview.signIn', async () => {
-            if (currentProvider?.auth) {
-                await authManager.ensureAuthenticated(currentProvider.name, currentProvider.auth);
+            const providers = providerManager.getAllProviders()
+                .filter(p => p.provider.capabilities.requiresAuthentication && p.provider.auth);
+            if (providers.length === 0) {
+                vscode.window.showInformationMessage('No providers require authentication');
+                return;
             }
+            // If multiple, let user choose
+            let target = providers[0];
+            if (providers.length > 1) {
+                const selected = await vscode.window.showQuickPick(
+                    providers.map(p => ({ label: p.displayName, description: p.id, value: p })),
+                    { placeHolder: 'Sign in to which provider?' },
+                );
+                if (!selected) { return; }
+                target = selected.value;
+            }
+            await authManager.ensureAuthenticated(target.id, target.provider.auth);
         }),
 
         vscode.commands.registerCommand('codepilotReview.signOut', async () => {
-            if (currentProvider?.auth) {
-                await authManager.signOut(currentProvider.name, currentProvider.auth);
-                vscode.window.showInformationMessage(`Signed out of ${currentProvider.name}`);
+            const providers = providerManager.getAllProviders()
+                .filter(p => p.provider.capabilities.requiresAuthentication && p.provider.auth);
+            if (providers.length === 0) { return; }
+            let target = providers[0];
+            if (providers.length > 1) {
+                const selected = await vscode.window.showQuickPick(
+                    providers.map(p => ({ label: p.displayName, description: p.id, value: p })),
+                    { placeHolder: 'Sign out of which provider?' },
+                );
+                if (!selected) { return; }
+                target = selected.value;
             }
+            await authManager.signOut(target.id, target.provider.auth);
+            vscode.window.showInformationMessage(`Signed out of ${target.displayName}`);
         }),
 
         // --- Config Command ---
@@ -720,12 +820,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
     );
 
-    // React to config changes
+    // React to config changes — reinitialize providers
     config.onDidChange(async () => {
-        const newProvider = config.getConfig().provider;
-        if (currentProvider && currentProvider.name !== newProvider) {
-            await initProvider(newProvider);
-        }
+        await providerManager.initializeFromConfig();
+        syncProviders();
     });
 
     // Listen for AI model availability changes
@@ -745,7 +843,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             sessionService.dispose();
             partitionService.dispose();
             tourService.dispose();
-            currentProvider?.dispose();
+            providerManager.dispose();
             logger.dispose();
         }
     });
@@ -754,5 +852,5 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-    currentProvider?.dispose();
+    // Provider cleanup handled by context.subscriptions
 }

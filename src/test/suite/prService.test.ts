@@ -137,20 +137,20 @@ suite('PullRequestService - filterPullRequests', () => {
             author: 'alice', status: 'open', sourceBranch: 'fix/login', targetBranch: 'main',
             createdAt: new Date('2024-01-01'), updatedAt: new Date('2024-01-02'),
             reviewers: [{ name: 'bob', id: 'bob', isRequired: true }],
-            labels: ['bug', 'urgent'], userNeed: 'blocking', priority: 'blocking', providerName: 'local',
+            labels: ['bug', 'urgent'], userNeed: 'blocking', priority: 'blocking', providerName: 'local', providerId: 'local',
         },
         {
             id: 'pr-2', title: 'Add feature X', description: 'New feature implementation',
             author: 'bob', status: 'draft', sourceBranch: 'feature/x', targetBranch: 'main',
             createdAt: new Date('2024-01-03'), updatedAt: new Date('2024-01-04'),
-            reviewers: [], labels: ['feature'], userNeed: 'fyi', priority: 'interest', providerName: 'local',
+            reviewers: [], labels: ['feature'], userNeed: 'fyi', priority: 'interest', providerName: 'local', providerId: 'local',
         },
         {
             id: 'pr-3', title: 'Refactor utils', description: 'Clean up utility functions',
             author: 'alice', status: 'open', sourceBranch: 'refactor/utils', targetBranch: 'main',
             createdAt: new Date('2024-01-05'), updatedAt: new Date('2024-01-06'),
             reviewers: [{ name: 'carol', id: 'carol', isRequired: false }],
-            labels: ['refactor'], userNeed: 'optional', providerName: 'local',
+            labels: ['refactor'], userNeed: 'optional', providerName: 'local', providerId: 'local',
         },
     ];
 

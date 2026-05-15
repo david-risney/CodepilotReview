@@ -1,0 +1,196 @@
+import * as vscode from 'vscode';
+import { ProviderInstanceConfig, ProviderType } from '../types';
+import { ICodeReviewProvider, ProviderInstance } from './provider';
+import { LocalProvider } from './localProvider';
+import { AzureDevOpsProvider } from './adoProvider';
+import { GitHubProvider } from './githubProvider';
+import { ChromiumProvider } from './chromiumProvider';
+import { AuthManager } from '../auth/authManager';
+import { logger } from '../logging/logger';
+
+/**
+ * Manages multiple provider instances simultaneously.
+ * Handles creation, initialization, lifecycle, and config normalization.
+ */
+export class ProviderManager {
+    private instances = new Map<string, ProviderInstance>();
+    private context: vscode.ExtensionContext | undefined;
+    private authManager: AuthManager | undefined;
+
+    private _onDidChangeProviders = new vscode.EventEmitter<void>();
+    readonly onDidChangeProviders = this._onDidChangeProviders.event;
+
+    setContext(context: vscode.ExtensionContext): void {
+        this.context = context;
+    }
+
+    setAuthManager(authManager: AuthManager): void {
+        this.authManager = authManager;
+    }
+
+    /**
+     * Initialize providers from config. Normalizes legacy single-provider
+     * settings into the multi-provider format for backward compatibility.
+     */
+    async initializeFromConfig(): Promise<void> {
+        const configs = this.getProviderConfigs();
+        await this.initializeAll(configs);
+    }
+
+    /**
+     * Read provider configs, preferring the `providers` array setting.
+     * Falls back to the legacy single `provider` + type-specific settings.
+     */
+    getProviderConfigs(): ProviderInstanceConfig[] {
+        const vsConfig = vscode.workspace.getConfiguration('codepilotReview');
+        const providers = vsConfig.get<ProviderInstanceConfig[]>('providers', []);
+
+        if (providers && providers.length > 0) {
+            return providers;
+        }
+
+        // Legacy: normalize single provider setting
+        const providerType = vsConfig.get<string>('provider', 'local') as ProviderType;
+        return [this.buildLegacyConfig(providerType, vsConfig)];
+    }
+
+    private buildLegacyConfig(
+        type: ProviderType,
+        vsConfig: vscode.WorkspaceConfiguration,
+    ): ProviderInstanceConfig {
+        const config: ProviderInstanceConfig = {
+            id: type,
+            label: this.displayNameForType(type),
+            type,
+        };
+
+        switch (type) {
+            case 'azureDevOps':
+                config.organization = vsConfig.get<string>('azureDevOps.organization', '');
+                config.project = vsConfig.get<string>('azureDevOps.project', '');
+                break;
+            case 'github':
+                config.owner = vsConfig.get<string>('github.owner', '');
+                config.repo = vsConfig.get<string>('github.repo', '');
+                break;
+            case 'chromium':
+                config.host = vsConfig.get<string>('chromium.host', '');
+                break;
+            case 'local':
+                config.baseBranch = vsConfig.get<string>('local.baseBranch', 'main');
+                break;
+        }
+
+        return config;
+    }
+
+    private displayNameForType(type: ProviderType): string {
+        switch (type) {
+            case 'azureDevOps': return 'Azure DevOps';
+            case 'github': return 'GitHub';
+            case 'chromium': return 'Chromium';
+            case 'local': return 'Local';
+        }
+    }
+
+    /** Initialize all providers from an array of configs. Disposes any existing providers first. */
+    async initializeAll(configs: ProviderInstanceConfig[]): Promise<void> {
+        this.disposeAll();
+
+        const results = await Promise.allSettled(
+            configs.map(cfg => this.addProvider(cfg)),
+        );
+
+        for (let i = 0; i < results.length; i++) {
+            if (results[i].status === 'rejected') {
+                const reason = (results[i] as PromiseRejectedResult).reason;
+                logger.error(`Failed to initialize provider "${configs[i].id}"`, reason);
+                vscode.window.showWarningMessage(
+                    `Failed to initialize provider "${configs[i].label}": ${reason?.message ?? reason}`,
+                );
+            }
+        }
+
+        this._onDidChangeProviders.fire();
+    }
+
+    /** Add and initialize a single provider instance. */
+    async addProvider(config: ProviderInstanceConfig): Promise<ProviderInstance> {
+        if (this.instances.has(config.id)) {
+            // Remove existing instance with same ID
+            this.removeProvider(config.id);
+        }
+
+        const provider = this.createProvider(config);
+        if (!this.context) {
+            throw new Error('ProviderManager context not set');
+        }
+
+        await provider.initialize(this.context);
+
+        // Authenticate if needed
+        if (provider.capabilities.requiresAuthentication && this.authManager) {
+            await this.authManager.ensureAuthenticated(config.id, provider.auth);
+        }
+
+        const instance: ProviderInstance = {
+            id: config.id,
+            displayName: config.label,
+            type: config.type,
+            provider,
+        };
+
+        this.instances.set(config.id, instance);
+        logger.info(`Provider "${config.id}" (${config.type}) initialized`);
+        return instance;
+    }
+
+    /** Remove and dispose a provider by ID. */
+    removeProvider(id: string): void {
+        const instance = this.instances.get(id);
+        if (instance) {
+            instance.provider.dispose();
+            this.instances.delete(id);
+            this._onDidChangeProviders.fire();
+            logger.info(`Provider "${id}" removed`);
+        }
+    }
+
+    /** Get a provider instance by ID. */
+    getProvider(id: string): ProviderInstance | undefined {
+        return this.instances.get(id);
+    }
+
+    /** Get all active provider instances. */
+    getAllProviders(): ProviderInstance[] {
+        return Array.from(this.instances.values());
+    }
+
+    /** Check if any provider of the given type is active. */
+    hasProviderOfType(type: ProviderType): boolean {
+        return this.getAllProviders().some(p => p.type === type);
+    }
+
+    /** Dispose all providers. */
+    disposeAll(): void {
+        for (const instance of this.instances.values()) {
+            instance.provider.dispose();
+        }
+        this.instances.clear();
+    }
+
+    dispose(): void {
+        this.disposeAll();
+        this._onDidChangeProviders.dispose();
+    }
+
+    private createProvider(config: ProviderInstanceConfig): ICodeReviewProvider {
+        switch (config.type) {
+            case 'azureDevOps': return new AzureDevOpsProvider(config);
+            case 'github': return new GitHubProvider(config);
+            case 'chromium': return new ChromiumProvider(config);
+            case 'local':
+            default: return new LocalProvider(config);
+        }
+    }
+}

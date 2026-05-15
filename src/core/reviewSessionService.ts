@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ReviewIssue, ReviewIssueStatus, DiffFile } from '../types';
-import { ICodeReviewProvider } from '../providers/provider';
+import { ReviewIssue, ReviewIssueStatus, DiffFile, PullRequest } from '../types';
+import { ICodeReviewProvider, ProviderInstance } from '../providers/provider';
 import { logger } from '../logging/logger';
 
 /**
@@ -9,43 +9,72 @@ import { logger } from '../logging/logger';
  */
 export class ReviewSessionService {
     private currentPrId: string | undefined;
+    private currentProviderId: string | undefined;
     private issues: Map<string, ReviewIssue> = new Map();
     private diff: DiffFile[] = [];
     private provider: ICodeReviewProvider | undefined;
+    private providerLookup: ((id: string) => ProviderInstance | undefined) | undefined;
 
     private _onDidChangeIssues = new vscode.EventEmitter<void>();
     readonly onDidChangeIssues = this._onDidChangeIssues.event;
 
+    /** @deprecated Use setProviderLookup() for multi-provider support */
     setProvider(provider: ICodeReviewProvider): void {
         this.provider = provider;
     }
 
+    /** Set a function to look up provider instances by ID */
+    setProviderLookup(lookup: (id: string) => ProviderInstance | undefined): void {
+        this.providerLookup = lookup;
+    }
+
     /** Start a review session for a pull request */
-    async openReview(prId: string): Promise<void> {
-        if (!this.provider) {
+    async openReview(prOrId: string | PullRequest): Promise<void> {
+        let prId: string;
+        let providerId: string | undefined;
+
+        if (typeof prOrId === 'string') {
+            prId = prOrId;
+        } else {
+            prId = prOrId.id;
+            providerId = prOrId.providerId;
+        }
+
+        // Resolve the provider for this review
+        const resolvedProvider = providerId && this.providerLookup
+            ? this.providerLookup(providerId)?.provider
+            : this.provider;
+
+        if (!resolvedProvider) {
             throw new Error('No provider configured');
         }
 
         this.currentPrId = prId;
+        this.currentProviderId = providerId;
+        this.provider = resolvedProvider;
         this.issues.clear();
 
         // Load diff
-        this.diff = await this.provider.diff.getDiff(prId);
+        this.diff = await resolvedProvider.diff.getDiff(prId);
 
         // Load existing comments from provider
-        if (this.provider.comments) {
-            const comments = await this.provider.comments.getComments(prId);
+        if (resolvedProvider.comments) {
+            const comments = await resolvedProvider.comments.getComments(prId);
             for (const comment of comments) {
                 this.issues.set(comment.id, comment);
             }
         }
 
         this._onDidChangeIssues.fire();
-        logger.info(`Opened review for PR ${prId} with ${this.diff.length} files`);
+        logger.info(`Opened review for PR ${prId} (provider: ${providerId || 'default'}) with ${this.diff.length} files`);
     }
 
     getCurrentPrId(): string | undefined {
         return this.currentPrId;
+    }
+
+    getCurrentProviderId(): string | undefined {
+        return this.currentProviderId;
     }
 
     getDiff(): DiffFile[] {
