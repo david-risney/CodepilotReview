@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { ReviewIssue } from './types';
 import { Configuration } from './config/configuration';
 import { LocalProvider } from './providers/localProvider';
 import { AzureDevOpsProvider } from './providers/adoProvider';
@@ -222,8 +223,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     existingIssues,
                 });
 
-                for (const issue of issues) {
-                    sessionService.addIssue(issue);
+                if (issues.length === 0) {
+                    vscode.window.showInformationMessage('Review tools found no issues');
+                    return;
+                }
+
+                // Let user pick which issues to keep (triage step)
+                const picks = issues.map(issue => ({
+                    label: issue.summary,
+                    description: `${issue.position.filePath}:${issue.position.line}`,
+                    detail: issue.details?.substring(0, 120),
+                    picked: true, // default all selected
+                    issue,
+                }));
+
+                const selected = await vscode.window.showQuickPick(picks, {
+                    canPickMany: true,
+                    placeHolder: `${issues.length} potential issue(s) found. Select which to keep as draft review issues.`,
+                    title: 'Triage Review Tool Results',
+                });
+
+                if (!selected || selected.length === 0) {
+                    vscode.window.showInformationMessage('No issues selected');
+                    return;
+                }
+
+                for (const pick of selected) {
+                    sessionService.addIssue(pick.issue);
                 }
 
                 const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -232,7 +258,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
 
                 vscode.window.showInformationMessage(
-                    `Review tools found ${issues.length} potential issue(s)`
+                    `Added ${selected.length} of ${issues.length} issue(s) as drafts`
                 );
             } catch (error) {
                 showError(error);
@@ -240,6 +266,55 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
 
         // --- Issue Commands ---
+        vscode.commands.registerCommand('codepilotReview.createIssue', async () => {
+            // Create a new review issue from the current editor position
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showWarningMessage('Open a file first');
+                return;
+            }
+            const prId = sessionService.getCurrentPrId();
+            if (!prId) {
+                vscode.window.showWarningMessage('Open a review first');
+                return;
+            }
+
+            const summary = await vscode.window.showInputBox({
+                prompt: 'Issue summary (TLDR)',
+                placeHolder: 'e.g., Missing null check before dereference',
+            });
+            if (!summary) { return; }
+
+            const details = await vscode.window.showInputBox({
+                prompt: 'Details (optional)',
+                placeHolder: 'Full description of the issue...',
+            });
+
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            const filePath = workspaceFolder
+                ? vscode.workspace.asRelativePath(editor.document.uri, false)
+                : editor.document.fileName;
+            const line = editor.selection.active.line + 1;
+
+            const issue: ReviewIssue = {
+                id: `user-${Date.now()}`,
+                summary,
+                details: details || '',
+                position: { filePath, line, side: 'head' },
+                status: 'draft',
+                source: 'user',
+                createdAt: new Date(),
+            };
+
+            sessionService.addIssue(issue);
+
+            if (workspaceFolder) {
+                await commentController.showIssues(sessionService.getIssues(), workspaceFolder.uri);
+            }
+
+            vscode.window.showInformationMessage(`Created draft issue: ${summary}`);
+        }),
+
         vscode.commands.registerCommand('codepilotReview.goToIssue', async (issue) => {
             if (!issue) { return; }
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];

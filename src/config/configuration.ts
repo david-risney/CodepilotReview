@@ -21,6 +21,7 @@ export class Configuration {
     readonly onDidChange = this._onDidChange.event;
 
     private configWatcher?: vscode.FileSystemWatcher;
+    private userConfigWatcher?: vscode.FileSystemWatcher;
 
     async initialize(): Promise<void> {
         await this.loadConfigs();
@@ -30,6 +31,7 @@ export class Configuration {
     dispose(): void {
         this._onDidChange.dispose();
         this.configWatcher?.dispose();
+        this.userConfigWatcher?.dispose();
     }
 
     /** Get the merged configuration */
@@ -168,6 +170,21 @@ export class Configuration {
             this.configWatcher.onDidChange(() => this.reload());
             this.configWatcher.onDidCreate(() => this.reload());
             this.configWatcher.onDidDelete(() => this.reload());
+        }
+
+        // Watch user config file (~/.codepilotreview/config.json)
+        const userPath = this.getUserConfigPath();
+        const userDir = path.dirname(userPath);
+        try {
+            if (fs.existsSync(userDir)) {
+                const userPattern = new vscode.RelativePattern(userDir, path.basename(userPath));
+                this.userConfigWatcher = vscode.workspace.createFileSystemWatcher(userPattern);
+                this.userConfigWatcher.onDidChange(() => this.reload());
+                this.userConfigWatcher.onDidCreate(() => this.reload());
+                this.userConfigWatcher.onDidDelete(() => this.reload());
+            }
+        } catch {
+            logger.warn('Could not watch user config file');
         }
     }
 

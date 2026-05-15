@@ -12,6 +12,8 @@ export class CodeTourService {
     private currentTour: CodeTour | undefined;
     private currentStepIndex: number = 0;
     private stepDecoration: vscode.TextEditorDecorationType;
+    private annotationDecorationType: vscode.TextEditorDecorationType;
+    private allStepDecorations: Map<string, vscode.DecorationOptions[]> = new Map();
 
     private _onDidChangeTour = new vscode.EventEmitter<void>();
     readonly onDidChangeTour = this._onDidChangeTour.event;
@@ -23,8 +25,17 @@ export class CodeTourService {
         this.stepDecoration = vscode.window.createTextEditorDecorationType({
             backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
             isWholeLine: true,
-            gutterIconPath: undefined,
             overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.findMatchForeground'),
+        });
+
+        // Inline annotation decoration for tour step descriptions
+        this.annotationDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                margin: '0 0 0 1em',
+                color: new vscode.ThemeColor('editorCodeLens.foreground'),
+                fontStyle: 'italic',
+            },
+            isWholeLine: true,
         });
     }
 
@@ -108,6 +119,25 @@ export class CodeTourService {
         this.currentStepIndex = 0;
         this._onDidChangeTour.fire();
 
+        // Pre-compute inline annotations per file
+        this.allStepDecorations.clear();
+        for (let i = 0; i < tour.steps.length; i++) {
+            const step = tour.steps[i];
+            const key = step.filePath;
+            if (!this.allStepDecorations.has(key)) {
+                this.allStepDecorations.set(key, []);
+            }
+            const line = Math.max(0, step.line - 1);
+            this.allStepDecorations.get(key)!.push({
+                range: new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER),
+                renderOptions: {
+                    after: {
+                        contentText: `  ◀ Step ${i + 1}: ${step.title} — ${step.description.substring(0, 80)}`,
+                    },
+                },
+            });
+        }
+
         if (tour.steps.length > 0) {
             await this.showStep(0);
         }
@@ -164,20 +194,30 @@ export class CodeTourService {
                 ),
             });
 
-            // Highlight the current line
+            // Highlight the current step line
             editor.setDecorations(this.stepDecoration, [
                 new vscode.Range(Math.max(0, step.line - 1), 0, Math.max(0, step.line - 1), Number.MAX_SAFE_INTEGER),
             ]);
 
-            // Show step info
+            // Apply inline annotations for all tour steps in this file
+            const fileAnnotations = this.allStepDecorations.get(step.filePath) || [];
+            editor.setDecorations(this.annotationDecorationType, fileAnnotations);
+
+            // Show step info with navigation
             const stepNum = index + 1;
             const total = this.currentTour.steps.length;
+            const actions: string[] = [];
+            if (index > 0) { actions.push('Previous'); }
+            if (index < total - 1) { actions.push('Next'); }
+            actions.push('Stop Tour');
+
             vscode.window.showInformationMessage(
                 `Tour Step ${stepNum}/${total}: ${step.title}\n\n${step.description}`,
-                'Previous', 'Next'
+                ...actions
             ).then(action => {
                 if (action === 'Next') { this.nextStep(); }
                 if (action === 'Previous') { this.prevStep(); }
+                if (action === 'Stop Tour') { this.stopTour(); }
             });
 
         } catch (error) {
@@ -187,8 +227,24 @@ export class CodeTourService {
         this._onDidChangeTour.fire();
     }
 
+    /** Stop the current tour and clear decorations */
+    stopTour(): void {
+        this.currentTour = undefined;
+        this.currentStepIndex = 0;
+        this.allStepDecorations.clear();
+
+        // Clear decorations from all visible editors
+        for (const editor of vscode.window.visibleTextEditors) {
+            editor.setDecorations(this.stepDecoration, []);
+            editor.setDecorations(this.annotationDecorationType, []);
+        }
+
+        this._onDidChangeTour.fire();
+    }
+
     dispose(): void {
         this.stepDecoration.dispose();
+        this.annotationDecorationType.dispose();
         this._onDidChangeTour.dispose();
     }
 }

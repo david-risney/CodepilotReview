@@ -32,4 +32,35 @@ suite('AiService', () => {
         const result = await stubService.reviewWithPrompt('test', []);
         assert.strictEqual(result.length, 0);
     });
+
+    test('stub generateParsePattern returns empty string', async () => {
+        const result = await stubService.generateParsePattern('some example output', 'test command');
+        assert.strictEqual(result, '');
+    });
+
+    test('stub explainIssue returns not-available message', async () => {
+        const result = await stubService.explainIssue({
+            id: 'test',
+            summary: 'test issue',
+            details: 'details',
+            position: { filePath: 'foo.ts', line: 1, side: 'head' },
+            status: 'draft',
+            source: 'user',
+            createdAt: new Date(),
+        }, []);
+        assert.ok(result.includes('not available'));
+    });
+
+    test('stub proposeFix returns not-available message', async () => {
+        const result = await stubService.proposeFix({
+            id: 'test',
+            summary: 'test issue',
+            details: 'details',
+            position: { filePath: 'foo.ts', line: 1, side: 'head' },
+            status: 'draft',
+            source: 'user',
+            createdAt: new Date(),
+        }, []);
+        assert.ok(result.includes('not available'));
+    });
 });

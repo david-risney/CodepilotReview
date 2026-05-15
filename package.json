@@ -147,6 +147,12 @@
         "command": "codepilotReview.generateParsePattern",
         "title": "Generate Parse Pattern from Example Output",
         "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.createIssue",
+        "title": "Create Review Issue",
+        "category": "CodepilotReview",
+        "icon": "$(add)"
       }
     ],
     "viewsContainers": {
@@ -188,6 +194,11 @@
         },
         {
           "command": "codepilotReview.runReviewTools",
+          "when": "view == codepilotReview.reviewIssues",
+          "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.createIssue",
           "when": "view == codepilotReview.reviewIssues",
           "group": "navigation"
         },
