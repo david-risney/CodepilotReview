@@ -172,10 +172,12 @@ export class CopilotAiService implements IAiService {
                 'You are a code review assistant. Analyze the following code change and provide:\n' +
                 '1. A brief one-sentence summary of what this change does\n' +
                 '2. A priority assessment: is this blocking (needs immediate review), yes (should review), interest (nice to review), or no (does not need review)\n' +
-                '3. Any relevant links or references mentioned in the code (PR numbers, bug IDs, etc.)\n\n' +
+                '3. How much the current user\'s attention is needed: blocking (user is blocking this), required (user must review), optional (review welcome but not required), fyi (informational only)\n' +
+                '4. Any relevant links or references mentioned in the code (PR numbers, bug IDs, etc.)\n\n' +
                 'Respond in this exact format:\n' +
                 'SUMMARY: <one sentence>\n' +
                 'PRIORITY: <blocking|yes|interest|no>\n' +
+                'USER_NEED: <blocking|required|optional|fyi>\n' +
                 'LINKS: <comma-separated list or "none">\n\n' +
                 'Code change:\n' + diffText
             ),
