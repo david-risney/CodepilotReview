@@ -284,7 +284,7 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "mocha --require ts-node/register 'src/test/unit/**/*.test.ts'",
+    "test:unit": "npm run compile && mocha --require ./src/test/unit/setup.js --ui tdd --timeout 10000 \"out/test/suite/**/*.test.js\"",
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
@@ -296,7 +296,7 @@
     "@typescript-eslint/parser": "^6.15.0",
     "@vscode/test-electron": "^2.3.8",
     "eslint": "^8.56.0",
-    "mocha": "^10.2.0",
+    "mocha": "^11.7.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
