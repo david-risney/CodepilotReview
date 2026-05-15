@@ -679,6 +679,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
 
+        // --- Open Settings Command ---
+        vscode.commands.registerCommand('codepilotReview.openSettings', () => {
+            vscode.commands.executeCommand('workbench.action.openSettings', '@ext:codepilot-review.codepilot-review');
+        }),
+
         // --- Generate Parse Pattern Command ---
         vscode.commands.registerCommand('codepilotReview.generateParsePattern', async () => {
             const toolName = await vscode.window.showInputBox({

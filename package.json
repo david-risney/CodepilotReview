@@ -138,6 +138,12 @@
         "icon": "$(gear)"
       },
       {
+        "command": "codepilotReview.openSettings",
+        "title": "Open Settings",
+        "category": "CodepilotReview",
+        "icon": "$(gear)"
+      },
+      {
         "command": "codepilotReview.viewDiff",
         "title": "View File Diff",
         "category": "CodepilotReview",
@@ -189,6 +195,11 @@
         },
         {
           "command": "codepilotReview.filterPRs",
+          "when": "view == codepilotReview.prList",
+          "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.openSettings",
           "when": "view == codepilotReview.prList",
           "group": "navigation"
         },
