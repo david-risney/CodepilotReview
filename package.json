@@ -130,6 +130,18 @@
         "command": "codepilotReview.signOut",
         "title": "Sign Out",
         "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.openConfig",
+        "title": "Open Configuration",
+        "category": "CodepilotReview",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "codepilotReview.viewDiff",
+        "title": "View File Diff",
+        "category": "CodepilotReview",
+        "icon": "$(diff)"
       }
     ],
     "viewsContainers": {

@@ -13,6 +13,8 @@ import { ReviewerSuggestionService } from './core/reviewerSuggestionService';
 import { PrListViewProvider } from './views/prListView';
 import { ReviewIssuesViewProvider } from './views/reviewIssuesView';
 import { PartitionViewProvider } from './views/partitionView';
+import { ChatPanel } from './views/chatPanel';
+import { DiffContentProvider, openDiffView } from './views/diffContentProvider';
 import { ReviewCommentController } from './comments/commentController';
 import { ReviewToolManager } from './reviewTools/reviewToolManager';
 import { ReviewStore } from './storage/reviewStore';
@@ -84,6 +86,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const commentController = new ReviewCommentController(sessionService);
     context.subscriptions.push({ dispose: () => commentController.dispose() });
 
+    // Initialize chat panel
+    const chatPanel = new ChatPanel(aiService, context.extensionUri);
+    context.subscriptions.push(chatPanel);
+
+    // Register virtual document provider for read-only diff viewing
+    const diffContentProvider = new DiffContentProvider();
+    context.subscriptions.push(
+        vscode.workspace.registerTextDocumentContentProvider('codepilot-diff', diffContentProvider)
+    );
+    context.subscriptions.push(diffContentProvider);
+
     // Helper: show error to user
     const showError = (error: unknown) => {
         if (error instanceof CodepilotReviewError && error.userMessage) {
@@ -123,6 +136,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         prService.setProvider(currentProvider);
         sessionService.setProvider(currentProvider);
+        diffContentProvider.setProvider(currentProvider);
 
         prListView.refresh();
         logger.info(`Provider set to: ${currentProvider.name}`);
@@ -430,23 +444,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         // --- Chat Command ---
         vscode.commands.registerCommand('codepilotReview.openChat', async (initialPrompt?: string) => {
-            const prompt = initialPrompt || await vscode.window.showInputBox({
-                prompt: 'Ask about the code change',
-                placeHolder: 'e.g., What does this change do? Is this thread-safe?',
-            });
-            if (!prompt) { return; }
-
             try {
-                const response = await aiService.chat(prompt, {
-                    diff: sessionService.getDiff(),
-                    existingIssues: sessionService.getIssues(),
-                });
+                chatPanel.setContext(sessionService.getDiff(), sessionService.getIssues());
+                await chatPanel.open(initialPrompt || undefined);
+            } catch (error) {
+                showError(error);
+            }
+        }),
 
-                const doc = await vscode.workspace.openTextDocument({
-                    content: `# Chat: Code Review\n\n**Q:** ${prompt}\n\n**A:**\n\n${response}`,
-                    language: 'markdown',
-                });
-                await vscode.window.showTextDocument(doc, { preview: true });
+        // --- Diff View Command ---
+        vscode.commands.registerCommand('codepilotReview.viewDiff', async (file) => {
+            if (!file) { return; }
+            try {
+                await openDiffView(
+                    file.newPath || file.oldPath || '',
+                    file.oldRevision || 'HEAD~1',
+                    file.newRevision || 'HEAD',
+                    sessionService.getCurrentPrId() || '',
+                );
             } catch (error) {
                 showError(error);
             }
@@ -463,6 +478,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (currentProvider?.auth) {
                 await authManager.signOut(currentProvider.name, currentProvider.auth);
                 vscode.window.showInformationMessage(`Signed out of ${currentProvider.name}`);
+            }
+        }),
+
+        // --- Config Command ---
+        vscode.commands.registerCommand('codepilotReview.openConfig', async () => {
+            const scope = await vscode.window.showQuickPick(
+                [
+                    { label: 'Project', description: '.codepilotreview/config.json', value: 'project' as const },
+                    { label: 'User', description: '~/.codepilotreview/config.json', value: 'user' as const },
+                ],
+                { placeHolder: 'Which config file to open?' },
+            );
+            if (scope) {
+                await config.openConfigFile(scope.value);
             }
         }),
     );

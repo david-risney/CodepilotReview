@@ -65,6 +65,58 @@ export class Configuration {
         return this.getConfig().reviewTools || [];
     }
 
+    /** Validate config and return any errors */
+    validate(): string[] {
+        const errors: string[] = [];
+        const config = this.getConfig();
+
+        const validProviders = ['local', 'azureDevOps', 'github', 'chromium'];
+        if (!validProviders.includes(config.provider)) {
+            errors.push(`Invalid provider: "${config.provider}". Must be one of: ${validProviders.join(', ')}`);
+        }
+
+        for (const tool of config.reviewTools || []) {
+            if (!tool.name) {
+                errors.push('Review tool is missing a name');
+            }
+            if (tool.isPromptTool && !tool.prompt) {
+                errors.push(`Prompt tool "${tool.name}" is missing a prompt`);
+            }
+            if (!tool.isPromptTool && !tool.command) {
+                errors.push(`Command tool "${tool.name}" is missing a command`);
+            }
+        }
+
+        return errors;
+    }
+
+    /** Open config file for editing */
+    async openConfigFile(scope: 'project' | 'user'): Promise<void> {
+        const filePath = scope === 'project'
+            ? this.getProjectConfigPath()
+            : this.getUserConfigPath();
+
+        if (!filePath) {
+            vscode.window.showWarningMessage('No workspace folder open');
+            return;
+        }
+
+        // Create the file if it doesn't exist
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) {
+            await fs.promises.mkdir(dir, { recursive: true });
+        }
+        if (!fs.existsSync(filePath)) {
+            const template: Partial<CodepilotReviewConfig> = {
+                reviewTools: [],
+            };
+            await fs.promises.writeFile(filePath, JSON.stringify(template, null, 2), 'utf-8');
+        }
+
+        const doc = await vscode.workspace.openTextDocument(filePath);
+        await vscode.window.showTextDocument(doc);
+    }
+
     private async loadConfigs(): Promise<void> {
         this.projectConfig = await this.loadConfigFile(this.getProjectConfigPath());
         this.userConfig = await this.loadConfigFile(this.getUserConfigPath());

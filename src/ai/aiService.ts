@@ -39,6 +39,7 @@ export interface AiContext {
     fileContents?: Map<string, string>;
     existingIssues?: ReviewIssue[];
     knowledgeBase?: string;
+    conversationHistory?: string;
 }
 
 export interface PartitionSuggestion {
@@ -145,6 +146,9 @@ export class CopilotAiService implements IAiService {
             systemPrompt += '\n\nExisting review issues:\n' + context.existingIssues.map(
                 i => `- [${i.status}] ${i.summary}`
             ).join('\n');
+        }
+        if (context.conversationHistory) {
+            systemPrompt += '\n\nPrevious conversation:\n' + context.conversationHistory;
         }
 
         messages.push(vscode.LanguageModelChatMessage.User(systemPrompt));
