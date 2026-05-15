@@ -73,6 +73,9 @@ export class PrListViewProvider implements vscode.TreeDataProvider<PrTreeItem> {
         if (pr.reviewers.length > 0) {
             details.push(PrTreeItem.detail('Reviewers', pr.reviewers.map(r => r.name).join(', ')));
         }
+        if (pr.relevantLinks && pr.relevantLinks.length > 0) {
+            details.push(PrTreeItem.detail('Links', pr.relevantLinks.map(l => l.title).join(', ')));
+        }
 
         return details;
     }

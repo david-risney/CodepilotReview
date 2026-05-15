@@ -111,6 +111,7 @@ export class ReviewToolManager {
 
 /**
  * Built-in tool: Analyzes based on previous changes and code review feedback.
+ * Uses git log to find past changes and review patterns in affected files.
  */
 class HistoricReviewTool implements IReviewTool {
     readonly name = 'historic-review';
@@ -125,17 +126,49 @@ class HistoricReviewTool implements IReviewTool {
             return [];
         }
 
+        // Gather git history for changed files
+        let historyContext = '';
+        if (context.workspaceRoot) {
+            const changedFiles = input.diff.map(f => f.newPath || f.oldPath).filter(Boolean);
+            historyContext = await this.getGitHistory(changedFiles as string[], context.workspaceRoot);
+        }
+
         const prompt =
-            'You are reviewing a code change. Based on common code review patterns and best practices ' +
-            'for the languages and frameworks used in these files, identify potential issues.\n\n' +
+            'You are reviewing a code change. Analyze it based on the git history of the affected files.\n\n' +
             'Focus on:\n' +
-            '- Patterns that have historically caused bugs in similar code\n' +
-            '- Common code review feedback for this type of change\n' +
-            '- Missed edge cases or error handling\n' +
-            '- API misuse or deprecated patterns\n\n' +
+            '- Patterns from previous commits that were later reverted or fixed (indicating bugs)\n' +
+            '- Repeated changes to the same areas (indicating fragile code)\n' +
+            '- Previous code review feedback patterns (things reviewers commonly catch)\n' +
+            '- Common mistakes in similar past changes\n' +
+            '- Missed edge cases or error handling that was added in follow-up commits\n\n' +
+            (historyContext
+                ? `Here is the recent git history for the affected files:\n${historyContext}\n\n`
+                : '') +
             'Only report real, actionable issues. Do not report style nits.';
 
         return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken);
+    }
+
+    private async getGitHistory(files: string[], cwd: string): Promise<string> {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+
+        const parts: string[] = [];
+        for (const file of files.slice(0, 5)) { // Limit to 5 files to avoid huge prompts
+            try {
+                const { stdout } = await execAsync(
+                    `git log --oneline -10 --follow -- "${file}"`,
+                    { cwd, timeout: 10000 }
+                );
+                if (stdout.trim()) {
+                    parts.push(`## ${file}\n${stdout.trim()}`);
+                }
+            } catch {
+                // Skip files with no history
+            }
+        }
+        return parts.join('\n\n');
     }
 }
 
@@ -155,15 +188,53 @@ class MetaQuestionsTool implements IReviewTool {
             return [];
         }
 
+        // Get reviewer info from git history for context
+        let reviewerContext = '';
+        if (context.workspaceRoot) {
+            reviewerContext = await this.getReviewerContext(input, context);
+        }
+
         const prompt =
             'You are a senior reviewer performing a high-level review. Consider these meta questions:\n\n' +
             '1. Does this change make sense as a coherent unit? Should it be split?\n' +
-            '2. Are there any files changed that seem unrelated to the main purpose?\n' +
-            '3. Is the scope appropriate — too large, too small, or mixed concerns?\n' +
-            '4. Are there obvious missing changes (e.g., tests, documentation, config)?\n' +
-            '5. Are there potential security implications?\n\n' +
+            '2. Does this change match the stated bug/task/feature? Are there signs it\'s solving the wrong problem?\n' +
+            '3. Is the bug/task ready to be implemented? Are prerequisites met?\n' +
+            '4. Are there any files changed that seem unrelated to the main purpose?\n' +
+            '5. Is the scope appropriate — too large, too small, or mixed concerns?\n' +
+            '6. Are there obvious missing changes (e.g., tests, documentation, config)?\n' +
+            '7. Are there potential security implications?\n' +
+            '8. Are the correct people involved in this code review? Based on the files changed, ' +
+            'are the people who know this code best being consulted?\n\n' +
+            (reviewerContext
+                ? `File ownership context (recent committers per file):\n${reviewerContext}\n\n`
+                : '') +
             'Only report genuine concerns. Use file path "GENERAL" and line 1 for project-level issues.';
 
         return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken);
+    }
+
+    private async getReviewerContext(input: ReviewToolInput, context: ReviewToolContext): Promise<string> {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+
+        const parts: string[] = [];
+        const files = input.diff.map(f => f.newPath || f.oldPath).filter(Boolean);
+
+        for (const file of files.slice(0, 5)) {
+            try {
+                const { stdout } = await execAsync(
+                    `git log --format="%an" -10 -- "${file}"`,
+                    { cwd: context.workspaceRoot, timeout: 10000 }
+                );
+                if (stdout.trim()) {
+                    const authors = [...new Set(stdout.trim().split('\n'))];
+                    parts.push(`${file}: ${authors.join(', ')}`);
+                }
+            } catch {
+                // Skip
+            }
+        }
+        return parts.join('\n');
     }
 }

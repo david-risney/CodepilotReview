@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { IAiService } from '../ai/aiService';
 import { DiffFile, ReviewIssue } from '../types';
 import { logger } from '../logging/logger';
@@ -90,6 +92,7 @@ export class ChatPanel implements vscode.Disposable {
                 diff: this.diff,
                 existingIssues: this.existingIssues,
                 conversationHistory: contextParts.join('\n\n'),
+                knowledgeBase: this.loadKnowledgeBase(),
             });
 
             const assistantMsg: ChatMessage = { role: 'assistant', content: response, timestamp: new Date() };
@@ -107,6 +110,34 @@ export class ChatPanel implements vscode.Disposable {
 
     private postMessage(msg: unknown): void {
         this.panel?.webview.postMessage(msg);
+    }
+
+    /** Load knowledge base docs from the workspace */
+    private loadKnowledgeBase(): string | undefined {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) { return undefined; }
+
+        const kbPaths = [
+            path.join(workspaceFolder.uri.fsPath, 'docs', 'knowledge-base'),
+            path.join(workspaceFolder.uri.fsPath, '.codepilotreview', 'knowledge-base'),
+        ];
+
+        const parts: string[] = [];
+        for (const kbPath of kbPaths) {
+            if (!fs.existsSync(kbPath)) { continue; }
+            try {
+                const files = fs.readdirSync(kbPath).filter(f => f.endsWith('.md'));
+                for (const file of files.slice(0, 5)) { // Limit to avoid huge prompts
+                    const content = fs.readFileSync(path.join(kbPath, file), 'utf-8');
+                    // Truncate large files
+                    parts.push(`## ${file}\n${content.substring(0, 2000)}`);
+                }
+            } catch {
+                // Skip unreadable KB dirs
+            }
+        }
+
+        return parts.length > 0 ? parts.join('\n\n') : undefined;
     }
 
     private getHtml(): string {

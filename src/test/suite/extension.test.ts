@@ -34,6 +34,7 @@ suite('Extension', () => {
             'codepilotReview.signOut',
             'codepilotReview.openConfig',
             'codepilotReview.viewDiff',
+            'codepilotReview.generateParsePattern',
         ];
 
         for (const cmd of expectedCommands) {

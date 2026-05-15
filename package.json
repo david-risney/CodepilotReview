@@ -142,6 +142,11 @@
         "title": "View File Diff",
         "category": "CodepilotReview",
         "icon": "$(diff)"
+      },
+      {
+        "command": "codepilotReview.generateParsePattern",
+        "title": "Generate Parse Pattern from Example Output",
+        "category": "CodepilotReview"
       }
     ],
     "viewsContainers": {

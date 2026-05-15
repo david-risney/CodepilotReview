@@ -111,6 +111,10 @@ export class ReviewCommentController {
             md.appendMarkdown(`${issue.details}\n\n`);
         }
 
+        if (issue.command) {
+            md.appendMarkdown(`**To reproduce:** \`${issue.command}\`\n\n`);
+        }
+
         if (issue.toolName) {
             md.appendMarkdown(`*Found by: ${issue.toolName}*\n\n`);
         }

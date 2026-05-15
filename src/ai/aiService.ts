@@ -32,6 +32,11 @@ export interface IAiService {
     reviewWithPrompt(
         prompt: string, diff: DiffFile[], token?: vscode.CancellationToken
     ): Promise<ReviewIssue[]>;
+
+    /** Generate an outputParsePattern from example command output */
+    generateParsePattern(
+        exampleOutput: string, commandDescription: string, token?: vscode.CancellationToken
+    ): Promise<{ pattern: string; postParseScript?: string }>;
 }
 
 export interface AiContext {
@@ -150,6 +155,9 @@ export class CopilotAiService implements IAiService {
         if (context.conversationHistory) {
             systemPrompt += '\n\nPrevious conversation:\n' + context.conversationHistory;
         }
+        if (context.knowledgeBase) {
+            systemPrompt += '\n\nKnowledge base context:\n' + context.knowledgeBase;
+        }
 
         messages.push(vscode.LanguageModelChatMessage.User(systemPrompt));
         messages.push(vscode.LanguageModelChatMessage.User(prompt));
@@ -260,10 +268,10 @@ export class CopilotAiService implements IAiService {
             vscode.LanguageModelChatMessage.User(
                 'Convert the following code review feedback into a JSON array of issues.\n' +
                 'Each issue must have: summary (short TLDR), details (full explanation with how to reproduce), ' +
-                'filePath, line (number), side ("head" or "base").\n\n' +
+                'filePath, line (number), side ("head" or "base"), command (optional shell command to see the issue).\n\n' +
                 'Respond with ONLY a JSON array:\n' +
                 '```json\n' +
-                '[{"summary": "...", "details": "...", "filePath": "...", "line": 1, "side": "head"}]\n' +
+                '[{"summary": "...", "details": "...", "filePath": "...", "line": 1, "side": "head", "command": "..."}]\n' +
                 '```\n\n' +
                 'Review feedback to convert:\n' + rawResult
             ),
@@ -274,7 +282,7 @@ export class CopilotAiService implements IAiService {
             const jsonMatch = structured.match(/```json\s*([\s\S]*?)```/);
             const jsonStr = jsonMatch ? jsonMatch[1] : structured;
             const parsed = JSON.parse(jsonStr.trim()) as Array<{
-                summary: string; details: string; filePath: string; line: number; side: string;
+                summary: string; details: string; filePath: string; line: number; side: string; command?: string;
             }>;
 
             return parsed.map((item, index) => ({
@@ -289,11 +297,46 @@ export class CopilotAiService implements IAiService {
                 status: 'suggested' as const,
                 source: 'ai' as const,
                 toolName: 'Custom Prompt',
+                command: item.command,
                 createdAt: new Date(),
             }));
         } catch (error) {
             logger.error('Failed to parse review prompt response', error);
             return [];
+        }
+    }
+
+    async generateParsePattern(
+        exampleOutput: string, commandDescription: string, token?: vscode.CancellationToken
+    ): Promise<{ pattern: string; postParseScript?: string }> {
+        const messages = [
+            vscode.LanguageModelChatMessage.User(
+                'You are a tool configuration assistant. Given example output from a command-line tool, ' +
+                'generate a parse pattern that can extract file paths, line numbers, and messages.\n\n' +
+                `Tool description: ${commandDescription}\n\n` +
+                'The pattern uses these variables:\n' +
+                '- ${file} — matches a file path\n' +
+                '- ${line} — matches a line number\n' +
+                '- ${column} — matches a column number\n' +
+                '- ${message} — matches the message text\n' +
+                '- ${severity} — matches severity (error, warning, etc.)\n\n' +
+                'If the output format is too complex for a single-line pattern, also provide a ' +
+                'postParseScript (a Node.js expression that reads process.env.INPUT as JSON and writes transformed JSON to stdout).\n\n' +
+                'Example tool output:\n```\n' + exampleOutput + '\n```\n\n' +
+                'Respond with ONLY JSON:\n' +
+                '```json\n{"pattern": "...", "postParseScript": "..."}\n```'
+            ),
+        ];
+
+        const response = await this.sendRequest(messages, token);
+
+        try {
+            const jsonMatch = response.match(/```json\s*([\s\S]*?)```/);
+            const jsonStr = jsonMatch ? jsonMatch[1] : response;
+            return JSON.parse(jsonStr.trim());
+        } catch (error) {
+            logger.error('Failed to parse generated pattern', error);
+            return { pattern: '${file}:${line}: ${message}' };
         }
     }
 }
@@ -336,5 +379,11 @@ export class StubAiService implements IAiService {
         _prompt: string, _diff: DiffFile[], _token?: vscode.CancellationToken
     ): Promise<ReviewIssue[]> {
         return [];
+    }
+
+    async generateParsePattern(
+        _exampleOutput: string, _commandDescription: string, _token?: vscode.CancellationToken
+    ): Promise<{ pattern: string; postParseScript?: string }> {
+        return { pattern: '${file}:${line}: ${message}' };
     }
 }

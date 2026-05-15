@@ -123,6 +123,8 @@ export interface ReviewIssue {
     toolName?: string;
     /** Suggested fix, if available */
     suggestedFix?: SuggestedFix;
+    /** Command to run to reproduce/see the issue */
+    command?: string;
     /** Creation timestamp */
     createdAt: Date;
     /** Provider-specific comment ID (set after publishing) */

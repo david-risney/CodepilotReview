@@ -1,5 +1,7 @@
-import { PullRequest, PullRequestStatus } from '../types';
+import * as vscode from 'vscode';
+import { PullRequest, PullRequestStatus, ReviewPriority } from '../types';
 import { ICodeReviewProvider, PullRequestFilter } from '../providers/provider';
+import { IAiService } from '../ai/aiService';
 import { logger } from '../logging/logger';
 
 /**
@@ -8,11 +10,19 @@ import { logger } from '../logging/logger';
  */
 export class PullRequestService {
     private provider: ICodeReviewProvider | undefined;
+    private aiService: IAiService | undefined;
     private cachedPRs: PullRequest[] = [];
+
+    private _onDidEnrich = new vscode.EventEmitter<void>();
+    readonly onDidEnrich = this._onDidEnrich.event;
 
     setProvider(provider: ICodeReviewProvider): void {
         this.provider = provider;
         this.cachedPRs = [];
+    }
+
+    setAiService(aiService: IAiService): void {
+        this.aiService = aiService;
     }
 
     async getPullRequests(filter?: PullRequestFilter): Promise<PullRequest[]> {
@@ -23,6 +33,10 @@ export class PullRequestService {
 
         try {
             this.cachedPRs = await this.provider.pullRequests.getPullRequests(filter);
+
+            // Enrich PRs with AI-generated info in background
+            this.enrichPrsWithAi(this.cachedPRs);
+
             return this.cachedPRs;
         } catch (error) {
             logger.error('Failed to fetch pull requests', error);
@@ -35,6 +49,72 @@ export class PullRequestService {
             return undefined;
         }
         return this.provider.pullRequests.getPullRequest(id);
+    }
+
+    /**
+     * Enrich PRs with AI-generated summary, priority, and relevant links.
+     * Runs in background — doesn't block the PR list from appearing.
+     */
+    private async enrichPrsWithAi(prs: PullRequest[]): Promise<void> {
+        if (!this.aiService || !(await this.aiService.isAvailable())) {
+            return;
+        }
+
+        for (const pr of prs) {
+            // Skip if already enriched
+            if (pr.aiSummary) { continue; }
+
+            try {
+                const diff = await this.provider?.diff.getDiff(pr.id);
+                if (!diff || diff.length === 0) { continue; }
+
+                const response = await this.aiService.summarizeDiff(diff);
+                const parsed = this.parseSummarizeResponse(response);
+
+                pr.aiSummary = parsed.summary || undefined;
+                pr.priority = parsed.priority || undefined;
+                pr.relevantLinks = parsed.links;
+            } catch (error) {
+                logger.warn(`Failed to enrich PR ${pr.id} with AI info`, error);
+            }
+        }
+
+        // Notify views that PRs have been enriched with AI info
+        this._onDidEnrich.fire();
+    }
+
+    private parseSummarizeResponse(response: string): {
+        summary: string | null;
+        priority: ReviewPriority | null;
+        links: Array<{ title: string; url: string; type: 'other' }>;
+    } {
+        let summary: string | null = null;
+        let priority: ReviewPriority | null = null;
+        const links: Array<{ title: string; url: string; type: 'other' }> = [];
+
+        for (const line of response.split('\n')) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('SUMMARY:')) {
+                summary = trimmed.substring('SUMMARY:'.length).trim();
+            } else if (trimmed.startsWith('PRIORITY:')) {
+                const p = trimmed.substring('PRIORITY:'.length).trim().toLowerCase();
+                if (['blocking', 'yes', 'interest', 'no'].includes(p)) {
+                    priority = p as ReviewPriority;
+                }
+            } else if (trimmed.startsWith('LINKS:')) {
+                const linkStr = trimmed.substring('LINKS:'.length).trim();
+                if (linkStr !== 'none') {
+                    for (const part of linkStr.split(',')) {
+                        const t = part.trim();
+                        if (t) {
+                            links.push({ title: t, url: '', type: 'other' });
+                        }
+                    }
+                }
+            }
+        }
+
+        return { summary, priority, links };
     }
 
     /** Advanced filtering that works across all providers (useful for ADO) */

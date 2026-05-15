@@ -55,6 +55,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Initialize services
     const prService = new PullRequestService();
+    prService.setAiService(aiService);
     const sessionService = new ReviewSessionService();
     const partitionService = new PartitionService(aiService, store);
     const tourService = new CodeTourService(aiService, store);
@@ -62,6 +63,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Initialize views
     const prListView = new PrListViewProvider(prService);
+
+    // Refresh PR list when AI enrichment completes
+    prService.onDidEnrich(() => prListView.refresh());
+
     const prTreeView = vscode.window.createTreeView('codepilotReview.prList', {
         treeDataProvider: prListView,
         showCollapseAll: true,
@@ -255,7 +260,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('codepilotReview.acceptIssue', async (item) => {
             const issue = item?.issue;
             if (!issue) { return; }
-            await sessionService.updateIssueStatus(issue.id, 'draft');
+            sessionService.acceptIssue(issue.id);
+            reviewIssuesView.refresh();
         }),
 
         vscode.commands.registerCommand('codepilotReview.dismissIssue', (item) => {
@@ -302,15 +308,58 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                             await vscode.env.clipboard.writeText(issue.suggestedFix.patch);
                             vscode.window.showInformationMessage('Patch copied to clipboard');
                             break;
+                        case 'suggestedChangeComment': {
+                            // Apply the suggested content change directly
+                            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                            if (workspaceFolder && issue.position) {
+                                const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, issue.position.filePath);
+                                const edit = new vscode.WorkspaceEdit();
+                                const line = Math.max(0, issue.position.line - 1);
+                                edit.replace(fileUri, new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER), issue.suggestedFix.newContent);
+                                await vscode.workspace.applyEdit(edit);
+                                vscode.window.showInformationMessage('Fix applied');
+                            }
+                            break;
+                        }
                     }
                 } else {
-                    // Ask AI for a fix
+                    // Ask AI for a fix and offer to apply it
                     const fix = await aiService.proposeFix(issue, sessionService.getDiff());
-                    const doc = await vscode.workspace.openTextDocument({
-                        content: `# Suggested Fix\n\n**${issue.summary}**\n\n${fix}`,
-                        language: 'markdown',
-                    });
-                    await vscode.window.showTextDocument(doc, { preview: true });
+
+                    // Try to extract a code block from the fix and apply it
+                    const codeBlockMatch = fix.match(/```[\w]*\n([\s\S]*?)```/);
+                    if (codeBlockMatch) {
+                        const suggestedCode = codeBlockMatch[1].trim();
+                        const action = await vscode.window.showInformationMessage(
+                            `Fix suggested for: ${issue.summary}`,
+                            'Apply', 'Copy to Clipboard', 'View Details'
+                        );
+                        if (action === 'Apply') {
+                            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                            if (workspaceFolder && issue.position) {
+                                const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, issue.position.filePath);
+                                const edit = new vscode.WorkspaceEdit();
+                                const line = Math.max(0, issue.position.line - 1);
+                                edit.replace(fileUri, new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER), suggestedCode);
+                                await vscode.workspace.applyEdit(edit);
+                            }
+                        } else if (action === 'Copy to Clipboard') {
+                            await vscode.env.clipboard.writeText(suggestedCode);
+                            vscode.window.showInformationMessage('Fix copied to clipboard');
+                        } else if (action === 'View Details') {
+                            const doc = await vscode.workspace.openTextDocument({
+                                content: `# Suggested Fix\n\n**${issue.summary}**\n\n${fix}`,
+                                language: 'markdown',
+                            });
+                            await vscode.window.showTextDocument(doc, { preview: true });
+                        }
+                    } else {
+                        const doc = await vscode.workspace.openTextDocument({
+                            content: `# Suggested Fix\n\n**${issue.summary}**\n\n${fix}`,
+                            language: 'markdown',
+                        });
+                        await vscode.window.showTextDocument(doc, { preview: true });
+                    }
                 }
             } catch (error) {
                 showError(error);
@@ -492,6 +541,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             );
             if (scope) {
                 await config.openConfigFile(scope.value);
+            }
+        }),
+
+        // --- Generate Parse Pattern Command ---
+        vscode.commands.registerCommand('codepilotReview.generateParsePattern', async () => {
+            const toolName = await vscode.window.showInputBox({
+                prompt: 'What tool does this parse pattern belong to?',
+                placeHolder: 'e.g., eslint, mypy, cargo clippy',
+            });
+            if (!toolName) { return; }
+
+            const exampleOutput = await vscode.window.showInputBox({
+                prompt: 'Paste example output from the tool (or a few lines)',
+                placeHolder: 'e.g., src/main.ts:42:5: error: unused variable \'x\'',
+            });
+            if (!exampleOutput) { return; }
+
+            try {
+                const result = await aiService.generateParsePattern(exampleOutput, toolName);
+                const doc = await vscode.workspace.openTextDocument({
+                    content: JSON.stringify({
+                        name: toolName,
+                        description: `Custom review tool: ${toolName}`,
+                        command: `<your command here>`,
+                        outputParsePattern: result.pattern,
+                        ...(result.postParseScript ? { postParseScript: result.postParseScript } : {}),
+                    }, null, 2),
+                    language: 'json',
+                });
+                await vscode.window.showTextDocument(doc, { preview: true });
+                vscode.window.showInformationMessage(
+                    'Generated parse pattern. Copy this into your config.json reviewTools array.'
+                );
+            } catch (error) {
+                showError(error);
             }
         }),
     );

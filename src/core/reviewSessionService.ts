@@ -66,6 +66,15 @@ export class ReviewSessionService {
         this._onDidChangeIssues.fire();
     }
 
+    /** Accept a suggested issue, promoting it to draft status */
+    acceptIssue(issueId: string): void {
+        const issue = this.issues.get(issueId);
+        if (issue && issue.status === 'suggested') {
+            issue.status = 'draft';
+            this._onDidChangeIssues.fire();
+        }
+    }
+
     /** Update issue status */
     async updateIssueStatus(issueId: string, status: ReviewIssueStatus): Promise<void> {
         const issue = this.issues.get(issueId);
