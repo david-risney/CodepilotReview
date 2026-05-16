@@ -117,10 +117,14 @@ class FileTreeNode extends vscode.TreeItem {
     constructor(label: string, filePath: string) {
         super(label, vscode.TreeItemCollapsibleState.None);
         this.iconPath = new vscode.ThemeIcon('file');
+        const wsFolder = vscode.workspace.workspaceFolders?.[0];
+        const fileUri = wsFolder
+            ? vscode.Uri.joinPath(wsFolder.uri, filePath)
+            : vscode.Uri.file(filePath);
         this.command = {
             command: 'vscode.open',
             title: 'Open File',
-            arguments: [vscode.Uri.file(filePath)],
+            arguments: [fileUri],
         };
     }
 }
