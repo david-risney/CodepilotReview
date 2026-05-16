@@ -91,15 +91,16 @@ suite('Extension', () => {
         }
     });
 
-    test('package.json configuration has all provider options', () => {
+    test('package.json configuration has providers array setting', () => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const pkg = require('../../../package.json');
-        const providerProp = pkg.contributes.configuration.properties['codepilotReview.provider'];
-        assert.ok(providerProp);
-        assert.ok(providerProp.enum.includes('local'));
-        assert.ok(providerProp.enum.includes('azureDevOps'));
-        assert.ok(providerProp.enum.includes('github'));
-        assert.ok(providerProp.enum.includes('chromium'));
+        const providersProp = pkg.contributes.configuration.properties['codepilotReview.providers'];
+        assert.ok(providersProp);
+        assert.strictEqual(providersProp.type, 'array');
+        assert.ok(providersProp.items.properties.type.enum.includes('local'));
+        assert.ok(providersProp.items.properties.type.enum.includes('azureDevOps'));
+        assert.ok(providersProp.items.properties.type.enum.includes('github'));
+        assert.ok(providersProp.items.properties.type.enum.includes('chromium'));
     });
 
     test('all commands have title and category', () => {

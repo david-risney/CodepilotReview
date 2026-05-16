@@ -278,56 +278,10 @@
     "configuration": {
       "title": "CodepilotReview",
       "properties": {
-        "codepilotReview.provider": {
-          "type": "string",
-          "default": "local",
-          "enum": [
-            "local",
-            "azureDevOps",
-            "github",
-            "chromium"
-          ],
-          "description": "Code review provider to use"
-        },
-        "codepilotReview.azureDevOps.organization": {
-          "type": "string",
-          "default": "",
-          "description": "Azure DevOps organization name (e.g. 'microsoft')"
-        },
-        "codepilotReview.azureDevOps.project": {
-          "type": "string",
-          "default": "",
-          "description": "Azure DevOps project name (e.g. 'Edge')"
-        },
-        "codepilotReview.azureDevOps.repositoryId": {
-          "type": "string",
-          "default": "",
-          "description": "Azure DevOps repository name or ID. If empty, lists PRs across all repos in the project. (e.g. 'WebView2')"
-        },
-        "codepilotReview.github.owner": {
-          "type": "string",
-          "default": "",
-          "description": "GitHub repository owner (e.g. 'microsoft')"
-        },
-        "codepilotReview.github.repo": {
-          "type": "string",
-          "default": "",
-          "description": "GitHub repository name (e.g. 'vscode')"
-        },
-        "codepilotReview.chromium.host": {
-          "type": "string",
-          "default": "https://chromium-review.googlesource.com",
-          "description": "Chromium Gerrit host URL (e.g. 'https://chromium-review.googlesource.com')"
-        },
-        "codepilotReview.local.baseBranch": {
-          "type": "string",
-          "default": "main",
-          "description": "Base branch for local diff comparison (e.g. 'main', 'develop')"
-        },
         "codepilotReview.providers": {
           "type": "array",
           "default": [],
-          "description": "Multiple provider instances to run simultaneously. Each entry configures one provider. When non-empty, this overrides the single 'provider' setting above.",
+          "description": "Code review provider instances. Each entry configures one provider with its connection settings and optional views.",
           "markdownDescription": "Code review provider instances. Each entry configures one provider with its connection settings and optional views (saved searches).\n\nExample:\n```json\n[\n  {\n    \"id\": \"ado-edge\",\n    \"label\": \"Edge PRs\",\n    \"type\": \"azureDevOps\",\n    \"organization\": \"microsoft\",\n    \"project\": \"Edge\",\n    \"views\": [\n      { \"id\": \"my-prs\", \"label\": \"My PRs\", \"query\": { \"type\": \"azureDevOps\", \"creatorId\": \"me\" } },\n      { \"id\": \"needs-review\", \"label\": \"Needs Review\", \"query\": { \"type\": \"azureDevOps\", \"reviewerId\": \"me\" } }\n    ]\n  },\n  {\n    \"id\": \"github-vscode\",\n    \"label\": \"VS Code GitHub\",\n    \"type\": \"github\",\n    \"owner\": \"microsoft\",\n    \"repo\": \"vscode\"\n  }\n]\n```",
           "items": {
             "type": "object",
