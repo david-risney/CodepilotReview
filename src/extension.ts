@@ -82,6 +82,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
     context.subscriptions.push(partitionTreeView);
 
+    // Update partition view description with active scheme name
+    partitionService.onDidChangePartitions(() => {
+        const active = partitionService.getActiveScheme();
+        partitionTreeView.description = active ? active.label : undefined;
+    });
+
     // Initialize comment controller
     const commentController = new ReviewCommentController(sessionService);
     context.subscriptions.push({ dispose: () => commentController.dispose() });
@@ -758,6 +764,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
 
         // --- Partition Commands ---
+        vscode.commands.registerCommand('codepilotReview.selectPartitionScheme', async () => {
+            const schemes = partitionService.getSchemes();
+            if (schemes.length === 0) {
+                vscode.window.showWarningMessage('Open a review first');
+                return;
+            }
+
+            const activeId = partitionService.getActiveSchemeId();
+            const items = schemes.map(s => ({
+                label: s.label,
+                description: s.type === 'custom' ? s.prompt : s.type,
+                picked: s.id === activeId,
+                value: s.id,
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select partition scheme',
+            });
+            if (selected) {
+                partitionService.setActiveScheme(selected.value);
+            }
+        }),
+
         vscode.commands.registerCommand('codepilotReview.partitionByDependency', async () => {
             const prId = sessionService.getCurrentPrId();
             if (!prId) { vscode.window.showWarningMessage('Open a review first'); return; }

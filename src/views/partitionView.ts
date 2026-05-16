@@ -36,16 +36,15 @@ export class PartitionViewProvider implements vscode.TreeDataProvider<TreeNode> 
 
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
         if (!element) {
-            // Top level: partition schemes
-            const schemes = this.partitionService.getSchemes();
-            if (schemes.length === 0) {
-                return [DetailTreeNode.message('Select a pull request to see partitions.')];
+            const scheme = this.partitionService.getActiveScheme();
+            if (!scheme) {
+                const schemes = this.partitionService.getSchemes();
+                if (schemes.length === 0) {
+                    return [DetailTreeNode.message('Select a pull request to see partitions.')];
+                }
+                return [DetailTreeNode.message('Select a partition scheme.')];
             }
-            return schemes.map(s => new SchemeTreeNode(s));
-        }
 
-        if (element instanceof SchemeTreeNode) {
-            const scheme = element.scheme;
             if (!scheme.isLoaded) {
                 return [DetailTreeNode.message('$(loading~spin) Generating partitions...')];
             }

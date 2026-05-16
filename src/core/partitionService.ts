@@ -15,6 +15,7 @@ export class PartitionService {
     private schemes: PartitionScheme[] = [];
     private currentPrId: string | undefined;
     private currentDiff: DiffFile[] = [];
+    private _activeSchemeId: string = 'default';
 
     constructor(
         private aiService: IAiService,
@@ -24,6 +25,22 @@ export class PartitionService {
     /** Get all current schemes */
     getSchemes(): PartitionScheme[] {
         return this.schemes;
+    }
+
+    /** Get the active scheme */
+    getActiveScheme(): PartitionScheme | undefined {
+        return this.schemes.find(s => s.id === this._activeSchemeId);
+    }
+
+    /** Get the active scheme ID */
+    getActiveSchemeId(): string {
+        return this._activeSchemeId;
+    }
+
+    /** Set the active scheme */
+    setActiveScheme(schemeId: string): void {
+        this._activeSchemeId = schemeId;
+        this._onDidChangePartitions.fire();
     }
 
     /** Set up schemes for a new PR review. Creates default + dependencies schemes. */

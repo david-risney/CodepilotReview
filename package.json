@@ -109,6 +109,12 @@
         "category": "CodepilotReview"
       },
       {
+        "command": "codepilotReview.selectPartitionScheme",
+        "title": "Select Partition Scheme",
+        "category": "CodepilotReview",
+        "icon": "$(list-selection)"
+      },
+      {
         "command": "codepilotReview.partitionByDependency",
         "title": "Partition by Dependency",
         "category": "CodepilotReview"
@@ -278,6 +284,11 @@
         {
           "command": "codepilotReview.publishDraftComments",
           "when": "view == codepilotReview.reviewIssues",
+          "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.selectPartitionScheme",
+          "when": "view == codepilotReview.partitions",
           "group": "navigation"
         },
         {
