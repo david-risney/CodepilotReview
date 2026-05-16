@@ -46,13 +46,26 @@
       {
         "command": "codepilotReview.selectProvider",
         "title": "Manage Providers",
-        "category": "CodepilotReview"
+        "category": "CodepilotReview",
+        "icon": "$(server-process)"
       },
       {
         "command": "codepilotReview.addView",
         "title": "Add View",
         "category": "CodepilotReview",
         "icon": "$(add)"
+      },
+      {
+        "command": "codepilotReview.editProvider",
+        "title": "Edit Provider",
+        "category": "CodepilotReview",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codepilotReview.removeProviderNode",
+        "title": "Remove Provider",
+        "category": "CodepilotReview",
+        "icon": "$(trash)"
       },
       {
         "command": "codepilotReview.editView",
@@ -204,8 +217,20 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "codepilotReview.prList",
+        "contents": "No code review providers configured.\n[Add Provider](command:codepilotReview.selectProvider)\nConfigure providers to see pull requests here.",
+        "when": "codepilotReview.noProviders"
+      }
+    ],
     "menus": {
       "view/title": [
+        {
+          "command": "codepilotReview.selectProvider",
+          "when": "view == codepilotReview.prList",
+          "group": "navigation"
+        },
         {
           "command": "codepilotReview.refreshPRs",
           "when": "view == codepilotReview.prList",
@@ -262,6 +287,16 @@
           "command": "codepilotReview.addView",
           "when": "viewItem == provider",
           "group": "inline"
+        },
+        {
+          "command": "codepilotReview.editProvider",
+          "when": "viewItem == provider",
+          "group": "1_provider"
+        },
+        {
+          "command": "codepilotReview.removeProviderNode",
+          "when": "viewItem == provider",
+          "group": "1_provider"
         },
         {
           "command": "codepilotReview.editView",

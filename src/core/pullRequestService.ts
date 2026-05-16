@@ -18,12 +18,14 @@ export class PullRequestService {
 
     /** @deprecated Use setProviders() for multi-provider support */
     setProvider(provider: ICodeReviewProvider): void {
+        const config = { id: provider.name, label: provider.name, type: provider.name as any };
         this.providers = [{
             id: provider.name,
             displayName: provider.name,
             type: provider.name as any,
             provider,
             views: [{ id: 'all', label: 'All' }],
+            config,
         }];
         this.cachedPRs.clear();
     }

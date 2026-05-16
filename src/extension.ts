@@ -127,6 +127,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         prListView.setProviders(instances);
         // Comment controller: allow local commenting if any provider is local type
         commentController.setLocalProvider(instances.some(p => p.type === 'local'));
+        // Set context for welcome view
+        vscode.commands.executeCommand('setContext', 'codepilotReview.noProviders', instances.length === 0);
     };
     providerManager.onDidChangeProviders(syncProviders);
 
@@ -222,6 +224,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
                     try {
                         await providerManager.addProvider(cfg);
+                        await providerManager.persistConfig();
                         syncProviders();
                         vscode.window.showInformationMessage(`Added provider "${label}"`);
                     } catch (error) {
@@ -241,6 +244,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     );
                     if (toRemove) {
                         providerManager.removeProvider(toRemove.value);
+                        await providerManager.persistConfig();
                         syncProviders();
                         vscode.window.showInformationMessage(`Removed provider "${toRemove.label}"`);
                     }
@@ -325,6 +329,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const newView: ProviderView = { id, label, query };
             const views = [...instance.views, newView];
             providerManager.updateProviderViews(providerId!, views);
+            await providerManager.persistConfig();
             vscode.window.showInformationMessage(`Added view "${label}"`);
         }),
 
@@ -345,6 +350,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 v.id === view.id ? { ...v, label: newLabel } : v
             );
             providerManager.updateProviderViews(node.instance.id, views);
+            await providerManager.persistConfig();
         }),
 
         vscode.commands.registerCommand('codepilotReview.removeView', async (node?: ViewTreeNode) => {
@@ -360,7 +366,76 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
             const views = instance.views.filter(v => v.id !== node.view.id);
             providerManager.updateProviderViews(node.instance.id, views);
+            await providerManager.persistConfig();
             vscode.window.showInformationMessage(`Removed view "${node.view.label}"`);
+        }),
+
+        // --- Provider node context menu commands ---
+        vscode.commands.registerCommand('codepilotReview.editProvider', async (node?: ProviderTreeNode) => {
+            if (!(node instanceof ProviderTreeNode)) { return; }
+
+            const instance = node.instance;
+            const newLabel = await vscode.window.showInputBox({
+                prompt: 'Display label',
+                value: instance.displayName,
+            });
+            if (!newLabel) { return; }
+
+            // Allow editing type-specific fields
+            const config = { ...instance.config, label: newLabel };
+
+            if (instance.type === 'azureDevOps') {
+                const org = await vscode.window.showInputBox({ prompt: 'ADO Organization', value: config.organization || '' });
+                if (org === undefined) { return; }
+                config.organization = org;
+                const proj = await vscode.window.showInputBox({ prompt: 'ADO Project', value: config.project || '' });
+                if (proj === undefined) { return; }
+                config.project = proj;
+                const repo = await vscode.window.showInputBox({ prompt: 'Repository ID (empty for all)', value: config.repositoryId || '' });
+                if (repo === undefined) { return; }
+                config.repositoryId = repo;
+            } else if (instance.type === 'github') {
+                const owner = await vscode.window.showInputBox({ prompt: 'GitHub owner', value: config.owner || '' });
+                if (owner === undefined) { return; }
+                config.owner = owner;
+                const repo = await vscode.window.showInputBox({ prompt: 'GitHub repo', value: config.repo || '' });
+                if (repo === undefined) { return; }
+                config.repo = repo;
+            } else if (instance.type === 'chromium') {
+                const host = await vscode.window.showInputBox({ prompt: 'Gerrit host URL', value: config.host || 'https://chromium-review.googlesource.com' });
+                if (host === undefined) { return; }
+                config.host = host;
+            } else if (instance.type === 'local') {
+                const branch = await vscode.window.showInputBox({ prompt: 'Base branch', value: config.baseBranch || 'main' });
+                if (branch === undefined) { return; }
+                config.baseBranch = branch;
+            }
+
+            // Re-add provider with updated config (removes old, adds new)
+            try {
+                await providerManager.addProvider(config);
+                await providerManager.persistConfig();
+                syncProviders();
+                vscode.window.showInformationMessage(`Updated provider "${newLabel}"`);
+            } catch (error) {
+                showError(error);
+            }
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.removeProviderNode', async (node?: ProviderTreeNode) => {
+            if (!(node instanceof ProviderTreeNode)) { return; }
+
+            const confirm = await vscode.window.showWarningMessage(
+                `Remove provider "${node.instance.displayName}"?`,
+                { modal: true },
+                'Remove',
+            );
+            if (confirm !== 'Remove') { return; }
+
+            providerManager.removeProvider(node.instance.id);
+            await providerManager.persistConfig();
+            syncProviders();
+            vscode.window.showInformationMessage(`Removed provider "${node.instance.displayName}"`);
         }),
 
         vscode.commands.registerCommand('codepilotReview.filterPRs', async () => {

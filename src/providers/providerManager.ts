@@ -38,12 +38,34 @@ export class ProviderManager {
     }
 
     /**
-     * Read provider configs, preferring the `providers` array setting.
-     * Falls back to the legacy single `provider` + type-specific settings.
+     * Read provider configs from settings.
      */
     getProviderConfigs(): ProviderInstanceConfig[] {
         const vsConfig = vscode.workspace.getConfiguration('codepilotReview');
         return vsConfig.get<ProviderInstanceConfig[]>('providers', []);
+    }
+
+    /** Persist current provider configs back to settings. */
+    async persistConfig(): Promise<void> {
+        const configs: ProviderInstanceConfig[] = [];
+        for (const instance of this.instances.values()) {
+            const cfg: ProviderInstanceConfig = {
+                ...instance.config,
+                id: instance.id,
+                label: instance.displayName,
+                type: instance.type,
+            };
+            // Only persist views if they're not just the default "All"
+            const isDefaultOnly = instance.views.length === 1 && instance.views[0].id === 'all' && !instance.views[0].filter;
+            if (!isDefaultOnly) {
+                cfg.views = instance.views;
+            } else {
+                delete cfg.views;
+            }
+            configs.push(cfg);
+        }
+        const vsConfig = vscode.workspace.getConfiguration('codepilotReview');
+        await vsConfig.update('providers', configs, vscode.ConfigurationTarget.Global);
     }
 
     /** Initialize all providers from an array of configs. Disposes any existing providers first. */
@@ -95,6 +117,7 @@ export class ProviderManager {
             type: config.type,
             provider,
             views,
+            config,
         };
 
         this.instances.set(config.id, instance);
