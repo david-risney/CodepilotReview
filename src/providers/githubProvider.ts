@@ -171,7 +171,11 @@ async function getGitHubToken(createIfNone: boolean = false): Promise<string | u
 }
 
 async function requireToken(): Promise<string> {
-    const token = await getGitHubToken(false);
+    // First try silently, then prompt if needed
+    let token = await getGitHubToken(false);
+    if (!token) {
+        token = await getGitHubToken(true);
+    }
     if (!token) {
         throw new AuthError('Not authenticated with GitHub. Please sign in first.');
     }
@@ -346,10 +350,6 @@ export class GitHubProvider implements ICodeReviewProvider {
         if (this.instanceConfig) {
             this.owner = this.instanceConfig.owner || '';
             this.repo = this.instanceConfig.repo || '';
-        } else {
-            const config = vscode.workspace.getConfiguration('codepilotReview');
-            this.owner = config.get<string>('github.owner', '');
-            this.repo = config.get<string>('github.repo', '');
         }
 
         if (!this.owner || !this.repo) {

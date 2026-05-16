@@ -16,6 +16,7 @@ export class ProviderManager {
     private instances = new Map<string, ProviderInstance>();
     private context: vscode.ExtensionContext | undefined;
     private authManager: AuthManager | undefined;
+    private _suppressConfigReload = false;
 
     private _onDidChangeProviders = new vscode.EventEmitter<void>();
     readonly onDidChangeProviders = this._onDidChangeProviders.event;
@@ -33,6 +34,10 @@ export class ProviderManager {
      * settings into the multi-provider format for backward compatibility.
      */
     async initializeFromConfig(): Promise<void> {
+        if (this._suppressConfigReload) {
+            this._suppressConfigReload = false;
+            return;
+        }
         const configs = this.getProviderConfigs();
         await this.initializeAll(configs);
     }
@@ -64,6 +69,7 @@ export class ProviderManager {
             }
             configs.push(cfg);
         }
+        this._suppressConfigReload = true;
         const vsConfig = vscode.workspace.getConfiguration('codepilotReview');
         await vsConfig.update('providers', configs, vscode.ConfigurationTarget.Global);
     }
