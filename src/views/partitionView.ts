@@ -73,12 +73,6 @@ export class PartitionViewProvider implements vscode.TreeDataProvider<TreeNode> 
                 items.push(new FileTreeNode(chunk.filePath + rangeStr, chunk.filePath));
             }
 
-            items.push(DetailTreeNode.action(
-                '🚶 Start Code Tour',
-                'codepilotReview.startTour',
-                [p]
-            ));
-
             return items;
         }
 

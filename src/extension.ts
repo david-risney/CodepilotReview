@@ -835,15 +835,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
 
         // --- Code Tour Commands ---
-        vscode.commands.registerCommand('codepilotReview.startTour', async (partition) => {
-            if (!partition) { return; }
+        vscode.commands.registerCommand('codepilotReview.startTour', async () => {
             const prId = sessionService.getCurrentPrId();
-            if (!prId) { return; }
+            if (!prId) { vscode.window.showWarningMessage('Open a review first'); return; }
+            const diff = sessionService.getDiff();
+            if (diff.length === 0) { vscode.window.showWarningMessage('No diff available'); return; }
 
             try {
-                const tour = await tourService.generateTour(
-                    prId, partition, sessionService.getDiff()
-                );
+                const tour = await tourService.generateTour(prId, diff);
                 await tourService.startTour(tour);
             } catch (error) {
                 showError(error);
@@ -856,6 +855,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         vscode.commands.registerCommand('codepilotReview.prevTourStep', () => {
             tourService.prevStep();
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.stopTour', () => {
+            tourService.stopTour();
+            vscode.window.showInformationMessage('Code tour stopped');
         }),
 
         // --- Reviewer Commands ---

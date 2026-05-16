@@ -155,6 +155,12 @@
         "icon": "$(arrow-left)"
       },
       {
+        "command": "codepilotReview.stopTour",
+        "title": "Stop Code Tour",
+        "category": "CodepilotReview",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "codepilotReview.suggestReviewers",
         "title": "Suggest Reviewers",
         "category": "CodepilotReview"
@@ -276,6 +282,11 @@
         },
         {
           "command": "codepilotReview.partitionCustom",
+          "when": "view == codepilotReview.partitions",
+          "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.startTour",
           "when": "view == codepilotReview.partitions",
           "group": "navigation"
         }

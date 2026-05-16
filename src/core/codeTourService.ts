@@ -6,14 +6,14 @@ import { logger } from '../logging/logger';
 
 /**
  * Service for generating and navigating code tours.
- * Creates guided walkthroughs of code changes based on partitions.
+ * Creates guided walkthroughs of entire code changes using inline comments.
  */
 export class CodeTourService {
     private currentTour: CodeTour | undefined;
     private currentStepIndex: number = 0;
-    private stepDecoration: vscode.TextEditorDecorationType;
-    private annotationDecorationType: vscode.TextEditorDecorationType;
-    private allStepDecorations: Map<string, vscode.DecorationOptions[]> = new Map();
+    private commentController: vscode.CommentController;
+    private tourThreads: vscode.CommentThread[] = [];
+    private currentStepDecoration: vscode.TextEditorDecorationType;
 
     private _onDidChangeTour = new vscode.EventEmitter<void>();
     readonly onDidChangeTour = this._onDidChangeTour.event;
@@ -22,39 +22,27 @@ export class CodeTourService {
         private aiService: IAiService,
         private store: ReviewStore,
     ) {
-        this.stepDecoration = vscode.window.createTextEditorDecorationType({
+        this.commentController = vscode.comments.createCommentController(
+            'codepilotReview.tour',
+            'Code Tour'
+        );
+
+        this.currentStepDecoration = vscode.window.createTextEditorDecorationType({
             backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
             isWholeLine: true,
             overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.findMatchForeground'),
         });
-
-        // Inline annotation decoration for tour step descriptions
-        this.annotationDecorationType = vscode.window.createTextEditorDecorationType({
-            after: {
-                margin: '0 0 0 1em',
-                color: new vscode.ThemeColor('editorCodeLens.foreground'),
-                fontStyle: 'italic',
-            },
-            isWholeLine: true,
-        });
     }
 
-    /** Generate a code tour for a partition */
+    /** Generate a code tour across the entire code change */
     async generateTour(
         prId: string,
-        partition: Partition,
         diff: DiffFile[],
         token?: vscode.CancellationToken
     ): Promise<CodeTour> {
-        logger.info(`Generating tour for partition: ${partition.name}`);
+        logger.info(`Generating tour for PR ${prId} across ${diff.length} file(s)`);
 
-        // Build context about the files in this partition
-        const partitionDiff = diff.filter(f => {
-            const path = f.newPath || f.oldPath || '';
-            return partition.chunks.some(c => c.filePath === path);
-        });
-
-        const diffSummary = partitionDiff.map(f => {
+        const diffSummary = diff.map(f => {
             const path = f.newPath || f.oldPath || '';
             const addedLines = f.hunks.reduce((sum, h) =>
                 sum + h.lines.filter(l => l.type === 'add').length, 0);
@@ -63,14 +51,14 @@ export class CodeTourService {
             return `${path}: +${addedLines} -${deletedLines} (${f.changeType})`;
         }).join('\n');
 
-        // Use AI to generate tour steps
         const prompt =
-            `Generate a code review walkthrough for the "${partition.name}" partition.\n\n` +
-            `Description: ${partition.description}\n\n` +
+            `Generate a code review walkthrough for this entire code change.\n\n` +
             `Files changed:\n${diffSummary}\n\n` +
+            `Create a logical walkthrough that guides the reviewer through the changes ` +
+            `in dependency order — foundational changes first, then changes that build on them.\n\n` +
             `For each significant change, provide a tour step with:\n` +
             `- title: brief name for this step\n` +
-            `- description: explain WHY this change was made and HOW it works\n` +
+            `- description: explain WHY this change was made, HOW it works, and what to look for\n` +
             `- filePath: the file\n` +
             `- line: the key line number to focus on\n\n` +
             `Respond with a JSON array:\n` +
@@ -78,7 +66,7 @@ export class CodeTourService {
             '[{"title": "...", "description": "...", "filePath": "...", "line": 1}]\n' +
             '```';
 
-        const response = await this.aiService.chat(prompt, { diff: partitionDiff }, token);
+        const response = await this.aiService.chat(prompt, { diff }, token);
 
         let steps: CodeTourStep[] = [];
         try {
@@ -87,25 +75,21 @@ export class CodeTourService {
             const parsed = JSON.parse(jsonStr.trim()) as Array<{
                 title: string; description: string; filePath: string; line: number;
             }>;
-            steps = parsed.map(s => ({
-                ...s,
-                partitionId: partition.id,
-            }));
+            steps = parsed.map(s => ({ ...s }));
         } catch (error) {
             logger.error('Failed to parse tour steps from AI', error);
             // Fallback: one step per file
-            steps = partition.chunks.map(chunk => ({
-                title: `Review ${chunk.filePath}`,
-                description: `Changes in ${chunk.filePath}`,
-                filePath: chunk.filePath,
-                line: chunk.lineRanges?.[0]?.start || 1,
-                partitionId: partition.id,
+            steps = diff.map(f => ({
+                title: `Review ${f.newPath || f.oldPath || ''}`,
+                description: `Changes in ${f.newPath || f.oldPath || ''}`,
+                filePath: f.newPath || f.oldPath || '',
+                line: f.hunks[0]?.newStart || 1,
             }));
         }
 
         const tour: CodeTour = {
-            id: `tour-${partition.id}`,
-            name: `Tour: ${partition.name}`,
+            id: `tour-${prId}`,
+            name: `Code Tour`,
             steps,
         };
 
@@ -113,33 +97,47 @@ export class CodeTourService {
         return tour;
     }
 
-    /** Start a tour */
+    /** Start a tour, displaying all steps as inline comment threads */
     async startTour(tour: CodeTour): Promise<void> {
+        this.stopTour();
         this.currentTour = tour;
         this.currentStepIndex = 0;
         this._onDidChangeTour.fire();
 
-        // Pre-compute inline annotations per file
-        this.allStepDecorations.clear();
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) { return; }
+
+        // Create comment threads for all steps
         for (let i = 0; i < tour.steps.length; i++) {
             const step = tour.steps[i];
-            const key = step.filePath;
-            if (!this.allStepDecorations.has(key)) {
-                this.allStepDecorations.set(key, []);
-            }
+            const uri = vscode.Uri.joinPath(workspaceFolder.uri, step.filePath);
             const line = Math.max(0, step.line - 1);
-            this.allStepDecorations.get(key)!.push({
-                range: new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER),
-                renderOptions: {
-                    after: {
-                        contentText: `  ◀ Step ${i + 1}: ${step.title} — ${step.description.substring(0, 80)}`,
-                    },
-                },
-            });
+            const range = new vscode.Range(line, 0, line, 0);
+
+            const body = new vscode.MarkdownString();
+            body.isTrusted = true;
+            body.appendMarkdown(`**Step ${i + 1}/${tour.steps.length}: ${step.title}**\n\n`);
+            body.appendMarkdown(step.description);
+
+            const comment: vscode.Comment = {
+                body,
+                author: { name: `🚶 Tour Step ${i + 1}` },
+                mode: vscode.CommentMode.Preview,
+            };
+
+            const thread = this.commentController.createCommentThread(uri, range, [comment]);
+            thread.label = step.title;
+            thread.canReply = false;
+            thread.collapsibleState = i === 0
+                ? vscode.CommentThreadCollapsibleState.Expanded
+                : vscode.CommentThreadCollapsibleState.Collapsed;
+
+            this.tourThreads.push(thread);
         }
 
+        // Navigate to first step
         if (tour.steps.length > 0) {
-            await this.showStep(0);
+            await this.navigateToStep(0);
         }
     }
 
@@ -148,7 +146,7 @@ export class CodeTourService {
         if (!this.currentTour) { return; }
         if (this.currentStepIndex < this.currentTour.steps.length - 1) {
             this.currentStepIndex++;
-            await this.showStep(this.currentStepIndex);
+            await this.navigateToStep(this.currentStepIndex);
         }
     }
 
@@ -157,7 +155,7 @@ export class CodeTourService {
         if (!this.currentTour) { return; }
         if (this.currentStepIndex > 0) {
             this.currentStepIndex--;
-            await this.showStep(this.currentStepIndex);
+            await this.navigateToStep(this.currentStepIndex);
         }
     }
 
@@ -174,7 +172,7 @@ export class CodeTourService {
         return this.currentTour?.steps.length || 0;
     }
 
-    private async showStep(index: number): Promise<void> {
+    private async navigateToStep(index: number): Promise<void> {
         if (!this.currentTour) { return; }
         const step = this.currentTour.steps[index];
         if (!step) { return; }
@@ -186,65 +184,57 @@ export class CodeTourService {
 
         try {
             const doc = await vscode.workspace.openTextDocument(fileUri);
+            const line = Math.max(0, step.line - 1);
             const editor = await vscode.window.showTextDocument(doc, {
                 preview: false,
-                selection: new vscode.Range(
-                    Math.max(0, step.line - 1), 0,
-                    Math.max(0, step.line - 1), 0
-                ),
+                selection: new vscode.Range(line, 0, line, 0),
             });
 
-            // Highlight the current step line
-            editor.setDecorations(this.stepDecoration, [
-                new vscode.Range(Math.max(0, step.line - 1), 0, Math.max(0, step.line - 1), Number.MAX_SAFE_INTEGER),
+            // Highlight current step line
+            editor.setDecorations(this.currentStepDecoration, [
+                new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER),
             ]);
 
-            // Apply inline annotations for all tour steps in this file
-            const fileAnnotations = this.allStepDecorations.get(step.filePath) || [];
-            editor.setDecorations(this.annotationDecorationType, fileAnnotations);
+            // Expand current thread, collapse others
+            for (let i = 0; i < this.tourThreads.length; i++) {
+                this.tourThreads[i].collapsibleState = i === index
+                    ? vscode.CommentThreadCollapsibleState.Expanded
+                    : vscode.CommentThreadCollapsibleState.Collapsed;
+            }
 
-            // Show step info with navigation
-            const stepNum = index + 1;
-            const total = this.currentTour.steps.length;
-            const actions: string[] = [];
-            if (index > 0) { actions.push('Previous'); }
-            if (index < total - 1) { actions.push('Next'); }
-            actions.push('Stop Tour');
-
-            vscode.window.showInformationMessage(
-                `Tour Step ${stepNum}/${total}: ${step.title}\n\n${step.description}`,
-                ...actions
-            ).then(action => {
-                if (action === 'Next') { this.nextStep(); }
-                if (action === 'Previous') { this.prevStep(); }
-                if (action === 'Stop Tour') { this.stopTour(); }
-            });
-
+            // Show step progress in status bar
+            vscode.window.setStatusBarMessage(
+                `$(play) Tour: Step ${index + 1}/${this.currentTour.steps.length} — ${step.title}`,
+                5000
+            );
         } catch (error) {
-            logger.error(`Failed to show tour step: ${step.filePath}:${step.line}`, error);
+            logger.error(`Failed to navigate to tour step: ${step.filePath}:${step.line}`, error);
         }
 
         this._onDidChangeTour.fire();
     }
 
-    /** Stop the current tour and clear decorations */
+    /** Stop the current tour and clear all comment threads */
     stopTour(): void {
+        for (const thread of this.tourThreads) {
+            thread.dispose();
+        }
+        this.tourThreads = [];
         this.currentTour = undefined;
         this.currentStepIndex = 0;
-        this.allStepDecorations.clear();
 
-        // Clear decorations from all visible editors
+        // Clear decorations from visible editors
         for (const editor of vscode.window.visibleTextEditors) {
-            editor.setDecorations(this.stepDecoration, []);
-            editor.setDecorations(this.annotationDecorationType, []);
+            editor.setDecorations(this.currentStepDecoration, []);
         }
 
         this._onDidChangeTour.fire();
     }
 
     dispose(): void {
-        this.stepDecoration.dispose();
-        this.annotationDecorationType.dispose();
+        this.stopTour();
+        this.currentStepDecoration.dispose();
+        this.commentController.dispose();
         this._onDidChangeTour.dispose();
     }
 }
