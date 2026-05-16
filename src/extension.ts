@@ -138,6 +138,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Clear review state — selected PR may no longer be valid
         sessionService.clearReview();
         partitionService.clear();
+        vscode.commands.executeCommand('setContext', 'codepilotReview.hasActiveReview', false);
     };
     providerManager.onDidChangeProviders(syncProviders);
 
@@ -154,6 +155,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             try {
                 await sessionService.openReview(pr);
+                vscode.commands.executeCommand('setContext', 'codepilotReview.hasActiveReview', true);
                 await store.addReviewedPrId(pr.id);
                 const issues = sessionService.getIssues();
                 const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;

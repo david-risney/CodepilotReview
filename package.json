@@ -234,11 +234,13 @@
         },
         {
           "id": "codepilotReview.reviewIssues",
-          "name": "Review Issues"
+          "name": "Review Issues",
+          "when": "codepilotReview.hasActiveReview"
         },
         {
           "id": "codepilotReview.partitions",
-          "name": "Partitions"
+          "name": "Partitions",
+          "when": "codepilotReview.hasActiveReview"
         }
       ]
     },
