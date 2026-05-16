@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReviewIssue, Partition, CodeTour } from '../types';
+import { ReviewIssue, Partition, CodeTour, PartitionScheme } from '../types';
 import { logger } from '../logging/logger';
 
 /** Tracks the state of a review session across reloads */
@@ -78,6 +78,16 @@ export class ReviewStore {
     loadPartitions(prId: string): Partition[] {
         if (!this.context) { return []; }
         return this.context.workspaceState.get<Partition[]>(`partitions:${prId}`, []);
+    }
+
+    async saveCustomSchemes(prId: string, schemes: PartitionScheme[]): Promise<void> {
+        if (!this.context) { return; }
+        await this.context.workspaceState.update(`customSchemes:${prId}`, schemes);
+    }
+
+    loadCustomSchemes(prId: string): PartitionScheme[] {
+        if (!this.context) { return []; }
+        return this.context.workspaceState.get<PartitionScheme[]>(`customSchemes:${prId}`, []);
     }
 
     // --- Code Tours ---

@@ -162,6 +162,19 @@ export interface PartitionChunk {
 
 export type PartitionType = 'dependency' | 'ownership' | 'custom';
 
+/** A partition scheme defines how to divide a code change */
+export interface PartitionScheme {
+    id: string;
+    label: string;
+    type: 'default' | 'dependencies' | 'custom';
+    /** User-defined Copilot prompt (only for 'custom' type) */
+    prompt?: string;
+    /** Generated partitions (populated after running the scheme) */
+    partitions: Partition[];
+    /** Whether partitions have been generated */
+    isLoaded: boolean;
+}
+
 // --- Code Tour ---
 
 export interface CodeTour {

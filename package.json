@@ -120,8 +120,21 @@
       },
       {
         "command": "codepilotReview.partitionCustom",
-        "title": "Custom Partition...",
-        "category": "CodepilotReview"
+        "title": "Add Custom Partition...",
+        "category": "CodepilotReview",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codepilotReview.removePartitionScheme",
+        "title": "Remove Partition Scheme",
+        "category": "CodepilotReview",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codepilotReview.regeneratePartitions",
+        "title": "Regenerate Partitions",
+        "category": "CodepilotReview",
+        "icon": "$(refresh)"
       },
       {
         "command": "codepilotReview.startTour",
@@ -260,6 +273,11 @@
           "command": "codepilotReview.publishDraftComments",
           "when": "view == codepilotReview.reviewIssues",
           "group": "navigation"
+        },
+        {
+          "command": "codepilotReview.partitionCustom",
+          "when": "view == codepilotReview.partitions",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -306,6 +324,16 @@
         {
           "command": "codepilotReview.removeView",
           "when": "viewItem == providerView",
+          "group": "inline"
+        },
+        {
+          "command": "codepilotReview.regeneratePartitions",
+          "when": "viewItem == partitionScheme || viewItem == partitionSchemeCustom",
+          "group": "inline"
+        },
+        {
+          "command": "codepilotReview.removePartitionScheme",
+          "when": "viewItem == partitionSchemeCustom",
           "group": "inline"
         }
       ]

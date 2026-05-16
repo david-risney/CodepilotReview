@@ -1,21 +1,175 @@
 import * as vscode from 'vscode';
-import { DiffFile, Partition, PartitionChunk, PartitionType } from '../types';
+import { DiffFile, Partition, PartitionChunk, PartitionType, PartitionScheme } from '../types';
 import { IAiService, PartitionSuggestion } from '../ai/aiService';
 import { ReviewStore } from '../storage/reviewStore';
 import { logger } from '../logging/logger';
 
 /**
  * Service for partitioning code changes into logical chunks.
- * Supports dependency, ownership, and custom partitioning via AI.
+ * Manages partition schemes (default, dependencies, custom).
  */
 export class PartitionService {
     private _onDidChangePartitions = new vscode.EventEmitter<void>();
     readonly onDidChangePartitions = this._onDidChangePartitions.event;
 
+    private schemes: PartitionScheme[] = [];
+    private currentPrId: string | undefined;
+    private currentDiff: DiffFile[] = [];
+
     constructor(
         private aiService: IAiService,
         private store: ReviewStore,
     ) {}
+
+    /** Get all current schemes */
+    getSchemes(): PartitionScheme[] {
+        return this.schemes;
+    }
+
+    /** Set up schemes for a new PR review. Creates default + dependencies schemes. */
+    async initForReview(prId: string, diff: DiffFile[]): Promise<void> {
+        this.currentPrId = prId;
+        this.currentDiff = diff;
+
+        // Build default scheme immediately (no AI needed)
+        const defaultScheme: PartitionScheme = {
+            id: 'default',
+            label: 'Default',
+            type: 'default',
+            partitions: [this.createDefaultPartition(diff)],
+            isLoaded: true,
+        };
+
+        // Dependencies scheme — lazy loaded
+        const depsScheme: PartitionScheme = {
+            id: 'dependencies',
+            label: 'Dependencies',
+            type: 'dependencies',
+            partitions: [],
+            isLoaded: false,
+        };
+
+        // Restore any saved custom schemes
+        const savedSchemes = this.store.loadCustomSchemes(prId);
+
+        this.schemes = [defaultScheme, depsScheme, ...savedSchemes];
+        this._onDidChangePartitions.fire();
+
+        // Auto-generate dependencies in background
+        this.generateDependencies(prId, diff).catch(err => {
+            logger.warn('Auto-dependency partitioning failed', err);
+        });
+    }
+
+    /** Create a simple partition containing all files */
+    private createDefaultPartition(diff: DiffFile[]): Partition {
+        return {
+            id: 'default-all',
+            name: 'All Changes',
+            description: `${diff.length} changed file(s)`,
+            chunks: diff.map(f => ({ filePath: f.newPath || f.oldPath || '' })),
+            dependsOn: [],
+        };
+    }
+
+    /** Generate dependency partitions (async, updates scheme when done) */
+    private async generateDependencies(prId: string, diff: DiffFile[]): Promise<void> {
+        const scheme = this.schemes.find(s => s.id === 'dependencies');
+        if (!scheme) { return; }
+
+        try {
+            const partitions = await this.partitionByDependency(prId, diff);
+            scheme.partitions = partitions;
+            scheme.isLoaded = true;
+            this._onDidChangePartitions.fire();
+        } catch (err) {
+            scheme.partitions = [this.createDefaultPartition(diff)];
+            scheme.isLoaded = true;
+            this._onDidChangePartitions.fire();
+            throw err;
+        }
+    }
+
+    /** Add a custom partition scheme with a user prompt */
+    async addCustomScheme(label: string, prompt: string): Promise<PartitionScheme> {
+        if (!this.currentPrId || this.currentDiff.length === 0) {
+            throw new Error('No review is open');
+        }
+
+        const id = `custom-${Date.now()}`;
+        const scheme: PartitionScheme = {
+            id,
+            label,
+            type: 'custom',
+            prompt,
+            partitions: [],
+            isLoaded: false,
+        };
+
+        this.schemes.push(scheme);
+        this._onDidChangePartitions.fire();
+
+        // Generate partitions
+        try {
+            const partitions = await this.partitionCustom(
+                this.currentPrId, this.currentDiff, prompt
+            );
+            scheme.partitions = partitions;
+            scheme.isLoaded = true;
+
+            // Save custom schemes
+            this.store.saveCustomSchemes(this.currentPrId, this.getCustomSchemes());
+            this._onDidChangePartitions.fire();
+        } catch (err) {
+            scheme.isLoaded = true;
+            this._onDidChangePartitions.fire();
+            throw err;
+        }
+
+        return scheme;
+    }
+
+    /** Remove a custom scheme */
+    removeScheme(schemeId: string): void {
+        const idx = this.schemes.findIndex(s => s.id === schemeId);
+        if (idx >= 0 && this.schemes[idx].type === 'custom') {
+            this.schemes.splice(idx, 1);
+            if (this.currentPrId) {
+                this.store.saveCustomSchemes(this.currentPrId, this.getCustomSchemes());
+            }
+            this._onDidChangePartitions.fire();
+        }
+    }
+
+    /** Regenerate partitions for a scheme */
+    async regenerateScheme(schemeId: string): Promise<void> {
+        if (!this.currentPrId || this.currentDiff.length === 0) { return; }
+
+        const scheme = this.schemes.find(s => s.id === schemeId);
+        if (!scheme) { return; }
+
+        scheme.isLoaded = false;
+        this._onDidChangePartitions.fire();
+
+        if (scheme.type === 'default') {
+            scheme.partitions = [this.createDefaultPartition(this.currentDiff)];
+            scheme.isLoaded = true;
+        } else if (scheme.type === 'dependencies') {
+            await this.generateDependencies(this.currentPrId, this.currentDiff);
+        } else if (scheme.type === 'custom' && scheme.prompt) {
+            const partitions = await this.partitionCustom(
+                this.currentPrId, this.currentDiff, scheme.prompt
+            );
+            scheme.partitions = partitions;
+            scheme.isLoaded = true;
+        }
+
+        this._onDidChangePartitions.fire();
+    }
+
+    private getCustomSchemes(): PartitionScheme[] {
+        return this.schemes.filter(s => s.type === 'custom');
+    }
 
     /** Partition a diff by dependency relationships */
     async partitionByDependency(
@@ -32,7 +186,6 @@ export class PartitionService {
     async partitionByOwnership(
         prId: string, diff: DiffFile[], workspaceRoot: string, token?: vscode.CancellationToken
     ): Promise<Partition[]> {
-        // Try to use CODEOWNERS if available
         let ownershipContext = '';
         try {
             const codeownersUri = vscode.Uri.file(`${workspaceRoot}/CODEOWNERS`);
@@ -100,7 +253,6 @@ export class PartitionService {
 
         const uncovered = [...changedFiles].filter(f => f && !coveredFiles.has(f));
         if (uncovered.length > 0) {
-            // Add uncovered files to an "Other" partition
             partitions.push({
                 id: `${type}-other`,
                 name: 'Other Changes',

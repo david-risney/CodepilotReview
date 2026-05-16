@@ -9,7 +9,7 @@ import { CodeTourService } from './core/codeTourService';
 import { ReviewerSuggestionService } from './core/reviewerSuggestionService';
 import { PrListViewProvider, ProviderTreeNode, ViewTreeNode } from './views/prListView';
 import { ReviewIssuesViewProvider } from './views/reviewIssuesView';
-import { PartitionViewProvider } from './views/partitionView';
+import { PartitionViewProvider, SchemeTreeNode } from './views/partitionView';
 import { ChatPanel } from './views/chatPanel';
 import { DiffContentProvider, openDiffView } from './views/diffContentProvider';
 import { ReviewCommentController } from './comments/commentController';
@@ -150,6 +150,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
                 if (workspaceUri) {
                     await commentController.showIssues(issues, workspaceUri);
+                }
+                // Initialize partition schemes for this PR
+                const diff = sessionService.getDiff();
+                if (diff.length > 0) {
+                    await partitionService.initForReview(pr.id, diff);
                 }
             } catch (error) {
                 showError(error);
@@ -758,13 +763,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!prId) { vscode.window.showWarningMessage('Open a review first'); return; }
 
             try {
-                const partitions = await partitionService.partitionByDependency(
-                    prId, sessionService.getDiff()
-                );
-                partitionView.setPartitions(partitions);
-                vscode.window.showInformationMessage(
-                    `Created ${partitions.length} dependency partition(s)`
-                );
+                await partitionService.regenerateScheme('dependencies');
+                vscode.window.showInformationMessage('Regenerated dependency partitions');
             } catch (error) {
                 showError(error);
             }
@@ -792,20 +792,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const prId = sessionService.getCurrentPrId();
             if (!prId) { vscode.window.showWarningMessage('Open a review first'); return; }
 
-            const criteria = await vscode.window.showInputBox({
-                prompt: 'Describe how to partition this code change',
-                placeHolder: 'e.g., separate upstream vs downstream changes',
+            const label = await vscode.window.showInputBox({
+                prompt: 'Name for this partition scheme',
+                placeHolder: 'e.g., Frontend vs Backend',
             });
-            if (!criteria) { return; }
+            if (!label) { return; }
+
+            const prompt = await vscode.window.showInputBox({
+                prompt: 'Describe how Copilot should partition the code change',
+                placeHolder: 'e.g., separate frontend UI changes from backend API changes',
+            });
+            if (!prompt) { return; }
 
             try {
-                const partitions = await partitionService.partitionCustom(
-                    prId, sessionService.getDiff(), criteria
-                );
-                partitionView.setPartitions(partitions);
+                const scheme = await partitionService.addCustomScheme(label, prompt);
                 vscode.window.showInformationMessage(
-                    `Created ${partitions.length} custom partition(s)`
+                    `Created "${label}" with ${scheme.partitions.length} partition(s)`
                 );
+            } catch (error) {
+                showError(error);
+            }
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.removePartitionScheme', async (node?: SchemeTreeNode) => {
+            if (!(node instanceof SchemeTreeNode)) { return; }
+            if (node.scheme.type !== 'custom') {
+                vscode.window.showWarningMessage('Cannot remove built-in partition schemes');
+                return;
+            }
+            partitionService.removeScheme(node.scheme.id);
+            vscode.window.showInformationMessage(`Removed "${node.scheme.label}"`);
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.regeneratePartitions', async (node?: SchemeTreeNode) => {
+            if (!(node instanceof SchemeTreeNode)) { return; }
+            try {
+                await partitionService.regenerateScheme(node.scheme.id);
+                vscode.window.showInformationMessage(`Regenerated "${node.scheme.label}"`);
             } catch (error) {
                 showError(error);
             }
