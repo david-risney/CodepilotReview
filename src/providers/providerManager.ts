@@ -35,6 +35,7 @@ export class ProviderManager {
      */
     async initializeFromConfig(): Promise<void> {
         if (Date.now() < this._suppressUntil) {
+            logger.info('initializeFromConfig suppressed (recent persist)');
             return;
         }
         const configs = this.getProviderConfigs();

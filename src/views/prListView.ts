@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { PullRequest, PullRequestStatus, UserNeedLevel, ReviewPriority, ProviderView, LocalFilter } from '../types';
 import { PullRequestService } from '../core/pullRequestService';
 import { ProviderInstance } from '../providers/provider';
+import { logger } from '../logging/logger';
 
 /**
  * Tree node types for the PR list view hierarchy:
@@ -23,10 +24,11 @@ export class PrListViewProvider implements vscode.TreeDataProvider<TreeNode> {
 
     setProviders(providers: ProviderInstance[]): void {
         this.providers = providers;
-        this.refresh();
+        this.refresh('setProviders');
     }
 
-    refresh(): void {
+    refresh(reason?: string): void {
+        logger.info(`PR list refresh${reason ? ': ' + reason : ''}`);
         this._onDidChangeTreeData.fire();
     }
 
@@ -116,7 +118,7 @@ export class PrListViewProvider implements vscode.TreeDataProvider<TreeNode> {
                 view.filter.text = text.toLowerCase() || undefined;
             }
         }
-        this.refresh();
+        this.refresh('text filter changed');
     }
 
     setStatusFilter(statuses: PullRequestStatus[]): void {
@@ -126,7 +128,7 @@ export class PrListViewProvider implements vscode.TreeDataProvider<TreeNode> {
                 view.filter.statuses = statuses.length > 0 ? statuses : undefined;
             }
         }
-        this.refresh();
+        this.refresh('status filter changed');
     }
 
     setUserNeedFilter(needs: UserNeedLevel[]): void {
@@ -136,7 +138,7 @@ export class PrListViewProvider implements vscode.TreeDataProvider<TreeNode> {
                 view.filter.userNeed = needs.length > 0 ? needs : undefined;
             }
         }
-        this.refresh();
+        this.refresh('userNeed filter changed');
     }
 
     setPriorityFilter(priorities: ReviewPriority[]): void {
@@ -146,12 +148,12 @@ export class PrListViewProvider implements vscode.TreeDataProvider<TreeNode> {
                 view.filter.priority = priorities.length > 0 ? priorities : undefined;
             }
         }
-        this.refresh();
+        this.refresh('priority filter changed');
     }
 
     setProviderFilter(_providerIds: string[]): void {
         // No longer needed with hierarchical view; kept for interface compat
-        this.refresh();
+        this.refresh('provider filter changed');
     }
 }
 

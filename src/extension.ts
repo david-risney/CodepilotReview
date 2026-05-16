@@ -60,7 +60,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const prListView = new PrListViewProvider(prService);
 
     // Refresh PR list when AI enrichment completes
-    prService.onDidEnrich(() => prListView.refresh());
+    prService.onDidEnrich(() => prListView.refresh('AI enrichment complete'));
 
     const prTreeView = vscode.window.createTreeView('codepilotReview.prList', {
         treeDataProvider: prListView,
@@ -128,6 +128,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Sync providers to services when they change
     const syncProviders = () => {
+        logger.info('syncProviders: providers changed, refreshing all services');
         const instances = providerManager.getAllProviders();
         prService.setProviders(instances);
         prListView.setProviders(instances);
@@ -173,7 +174,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
 
         vscode.commands.registerCommand('codepilotReview.refreshPRs', () => {
-            prListView.refresh();
+            prListView.refresh('manual refresh command');
         }),
 
         vscode.commands.registerCommand('codepilotReview.selectProvider', async () => {
@@ -1049,6 +1050,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // React to config changes — reinitialize providers
     config.onDidChange(async () => {
+        logger.info('config.onDidChange fired, reinitializing providers');
         await providerManager.initializeFromConfig();
     });
 
