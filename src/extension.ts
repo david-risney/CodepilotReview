@@ -1050,7 +1050,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // React to config changes — reinitialize providers
     config.onDidChange(async () => {
         await providerManager.initializeFromConfig();
-        syncProviders();
     });
 
     // Listen for AI model availability changes

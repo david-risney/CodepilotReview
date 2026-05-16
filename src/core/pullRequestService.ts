@@ -12,6 +12,8 @@ export class PullRequestService {
     private providers: ProviderInstance[] = [];
     private aiService: IAiService | undefined;
     private cachedPRs = new Map<string, PullRequest[]>();
+    private _enriching = false;
+    private _enrichQueue: PullRequest[] | undefined;
 
     private _onDidEnrich = new vscode.EventEmitter<void>();
     readonly onDidEnrich = this._onDidEnrich.event;
@@ -200,41 +202,58 @@ export class PullRequestService {
             return;
         }
 
-        let enrichedAny = false;
-
-        for (const pr of prs) {
-            // Skip if already enriched
-            if (pr.aiSummary) { continue; }
-
-            try {
-                // Look up the correct provider for this PR
-                const instance = this.providers.find(p => p.id === pr.providerId);
-                if (!instance) { continue; }
-
-                const diff = await instance.provider.diff.getDiff(pr.id);
-                if (!diff || diff.length === 0) { continue; }
-
-                const response = await this.aiService.summarizeDiff(diff);
-                const parsed = this.parseSummarizeResponse(response);
-
-                pr.aiSummary = parsed.summary || undefined;
-                pr.priority = parsed.priority || undefined;
-                pr.relevantLinks = parsed.links;
-
-                // AI can upgrade userNeed if it detects the user should pay attention
-                if (parsed.userNeed) {
-                    pr.userNeed = parsed.userNeed;
-                }
-
-                enrichedAny = true;
-            } catch (error) {
-                logger.warn(`Failed to enrich PR ${pr.id} with AI info`, error);
-            }
+        // Prevent concurrent enrichment runs — queue for later
+        if (this._enriching) {
+            this._enrichQueue = prs;
+            return;
         }
+        this._enriching = true;
 
-        // Only notify views if at least one PR was actually enriched
-        if (enrichedAny) {
-            this._onDidEnrich.fire();
+        try {
+            let enrichedAny = false;
+
+            for (const pr of prs) {
+                // Skip if already enriched
+                if (pr.aiSummary) { continue; }
+
+                try {
+                    // Look up the correct provider for this PR
+                    const instance = this.providers.find(p => p.id === pr.providerId);
+                    if (!instance) { continue; }
+
+                    const diff = await instance.provider.diff.getDiff(pr.id);
+                    if (!diff || diff.length === 0) { continue; }
+
+                    const response = await this.aiService.summarizeDiff(diff);
+                    const parsed = this.parseSummarizeResponse(response);
+
+                    pr.aiSummary = parsed.summary || undefined;
+                    pr.priority = parsed.priority || undefined;
+                    pr.relevantLinks = parsed.links;
+
+                    // AI can upgrade userNeed if it detects the user should pay attention
+                    if (parsed.userNeed) {
+                        pr.userNeed = parsed.userNeed;
+                    }
+
+                    enrichedAny = true;
+                } catch (error) {
+                    logger.warn(`Failed to enrich PR ${pr.id} with AI info`, error);
+                }
+            }
+
+            // Only notify views if at least one PR was actually enriched
+            if (enrichedAny) {
+                this._onDidEnrich.fire();
+            }
+        } finally {
+            this._enriching = false;
+            // Process queued enrichment if any
+            if (this._enrichQueue) {
+                const queued = this._enrichQueue;
+                this._enrichQueue = undefined;
+                this.enrichPrsWithAi(queued);
+            }
         }
     }
 
