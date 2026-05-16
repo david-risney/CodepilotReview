@@ -130,9 +130,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
     providerManager.onDidChangeProviders(syncProviders);
 
-    // Initialize providers from config
+    // Initialize providers from config (fires onDidChangeProviders which calls syncProviders)
     await providerManager.initializeFromConfig();
-    syncProviders();
 
     // Register commands
     context.subscriptions.push(

@@ -266,6 +266,11 @@
           "default": "",
           "description": "Azure DevOps project name (e.g. 'Edge')"
         },
+        "codepilotReview.azureDevOps.repositoryId": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps repository name or ID. If empty, lists PRs across all repos in the project. (e.g. 'WebView2')"
+        },
         "codepilotReview.github.owner": {
           "type": "string",
           "default": "",

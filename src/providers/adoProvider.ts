@@ -245,6 +245,7 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
     private organization = '';
     private project = '';
     private repositoryId = '';
+    private prRepoMap = new Map<string, string>();
     private token = '';
     private isPat = false;
     private currentUser = '';
@@ -328,9 +329,31 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
         return `https://dev.azure.com/${encodeURIComponent(this.organization)}/${encodeURIComponent(this.project)}`;
     }
 
-    /** Git API base path (relative to API base). */
+    /** Git API base path for a specific repo, or project-level if no repo configured. */
     getGitRepoPath(): string {
-        return `/git/repositories/${encodeURIComponent(this.repositoryId)}`;
+        if (this.repositoryId) {
+            return `/git/repositories/${encodeURIComponent(this.repositoryId)}`;
+        }
+        // No repositoryId — use project-level git endpoint
+        return '/git';
+    }
+
+    /**
+     * Git API repo path for a specific PR. Uses the configured repositoryId,
+     * or falls back to the repository ID stored from the PR listing response.
+     */
+    getGitRepoPathForPr(prId: string): string {
+        const repoId = this.repositoryId || this.prRepoMap.get(prId);
+        if (repoId) {
+            return `/git/repositories/${encodeURIComponent(repoId)}`;
+        }
+        // Fallback to project-level
+        return '/git';
+    }
+
+    /** Store the repository ID associated with a PR (from listing response). */
+    setPrRepoId(prId: string, repoId: string): void {
+        this.prRepoMap.set(prId, repoId);
     }
 
     async ensureToken(): Promise<{ token: string; isPat: boolean }> {
@@ -395,6 +418,11 @@ class AdoPullRequestProvider implements IPullRequestProvider {
     constructor(private provider: AzureDevOpsProvider) {}
 
     async getPullRequests(filter?: PullRequestFilter): Promise<PullRequest[]> {
+        if (!this.provider.getOrganization() || !this.provider.getProject()) {
+            logger.warn('ADO: organization and project must be configured');
+            return [];
+        }
+
         const repoPath = this.provider.getGitRepoPath();
         const adoStatus = statusFilterToAdoStatus(filter?.status);
         const query: Record<string, string> = {};
@@ -408,10 +436,16 @@ class AdoPullRequestProvider implements IPullRequestProvider {
             { query },
         );
 
+        // Store PR → repository mapping for per-PR operations
+        for (const pr of prs) {
+            if (pr.repository?.id) {
+                this.provider.setPrRepoId(String(pr.pullRequestId), pr.repository.id);
+            }
+        }
+
         const webBase = this.provider.getWebBaseUrl();
         let results = prs.map((pr: any) => mapAdoPullRequest(pr, this.provider.name, this.provider.getInstanceId(), webBase));
 
-        // Client-side filtering for fields ADO search doesn't support
         if (filter) {
             results = this.applyClientFilter(results, filter);
         }
@@ -420,9 +454,12 @@ class AdoPullRequestProvider implements IPullRequestProvider {
     }
 
     async getPullRequest(id: string): Promise<PullRequest | undefined> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPathForPr(id);
         try {
             const pr = await this.provider.apiRequest<any>(`${repoPath}/pullrequests/${id}`);
+            if (pr.repository?.id) {
+                this.provider.setPrRepoId(String(pr.pullRequestId), pr.repository.id);
+            }
             return mapAdoPullRequest(pr, this.provider.name, this.provider.getInstanceId(), this.provider.getWebBaseUrl());
         } catch (e) {
             logger.error(`ADO: failed to get PR ${id}`, e);
@@ -467,7 +504,7 @@ class AdoDiffProvider implements IDiffProvider {
     constructor(private provider: AzureDevOpsProvider) {}
 
     async getDiff(pullRequestId: string): Promise<DiffFile[]> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPathForPr(pullRequestId);
 
         // 1. Get iterations
         const iterResponse = await this.provider.apiRequest<{ value: any[] }>(
@@ -519,7 +556,7 @@ class AdoDiffProvider implements IDiffProvider {
     }
 
     async getFileContent(filePath: string, revision: string): Promise<string> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPath(); // File content needs a repo; uses configured repo
         const query: Record<string, string> = {
             path: filePath,
         };
@@ -545,7 +582,7 @@ class AdoCommentProvider implements ICommentProvider {
     constructor(private provider: AzureDevOpsProvider) {}
 
     async getComments(pullRequestId: string): Promise<ReviewIssue[]> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPathForPr(pullRequestId);
         const response = await this.provider.apiRequest<{ value: any[] }>(
             `${repoPath}/pullrequests/${pullRequestId}/threads`,
         );
@@ -587,7 +624,7 @@ class AdoCommentProvider implements ICommentProvider {
     }
 
     async publishComment(pullRequestId: string, issue: ReviewIssue): Promise<ReviewIssue> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPathForPr(pullRequestId);
         const threadBody: any = {
             comments: [
                 {
@@ -622,7 +659,7 @@ class AdoCommentProvider implements ICommentProvider {
     }
 
     async updateComment(pullRequestId: string, issue: ReviewIssue): Promise<ReviewIssue> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPathForPr(pullRequestId);
         const [threadId, commentId] = this.parseCommentId(issue.providerCommentId ?? issue.id);
 
         await this.provider.apiRequest(
@@ -634,7 +671,7 @@ class AdoCommentProvider implements ICommentProvider {
     }
 
     async deleteComment(pullRequestId: string, commentId: string): Promise<void> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPathForPr(pullRequestId);
         const [threadId, cId] = this.parseCommentId(commentId);
 
         await this.provider.apiRequest(
@@ -646,7 +683,7 @@ class AdoCommentProvider implements ICommentProvider {
     async updateCommentStatus(
         pullRequestId: string, commentId: string, status: ReviewIssueStatus,
     ): Promise<void> {
-        const repoPath = this.provider.getGitRepoPath();
+        const repoPath = this.provider.getGitRepoPathForPr(pullRequestId);
         const [threadId] = this.parseCommentId(commentId);
 
         await this.provider.apiRequest(
