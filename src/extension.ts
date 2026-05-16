@@ -135,6 +135,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         commentController.setLocalProvider(instances.some(p => p.type === 'local'));
         // Set context for welcome view
         vscode.commands.executeCommand('setContext', 'codepilotReview.noProviders', instances.length === 0);
+        // Clear review state — selected PR may no longer be valid
+        sessionService.clearReview();
+        partitionService.clear();
     };
     providerManager.onDidChangeProviders(syncProviders);
 

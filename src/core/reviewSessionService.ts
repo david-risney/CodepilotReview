@@ -28,6 +28,15 @@ export class ReviewSessionService {
         this.providerLookup = lookup;
     }
 
+    /** Clear the current review session (no PR selected) */
+    clearReview(): void {
+        this.currentPrId = undefined;
+        this.currentProviderId = undefined;
+        this.issues.clear();
+        this.diff = [];
+        this._onDidChangeIssues.fire();
+    }
+
     /** Start a review session for a pull request */
     async openReview(prOrId: string | PullRequest): Promise<void> {
         let prId: string;

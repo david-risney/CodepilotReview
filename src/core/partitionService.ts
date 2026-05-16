@@ -43,6 +43,15 @@ export class PartitionService {
         this._onDidChangePartitions.fire();
     }
 
+    /** Clear all schemes (e.g. when no PR is selected) */
+    clear(): void {
+        this.schemes = [];
+        this.currentPrId = undefined;
+        this.currentDiff = [];
+        this._activeSchemeId = 'default';
+        this._onDidChangePartitions.fire();
+    }
+
     /** Set up schemes for a new PR review. Creates default + dependencies schemes. */
     async initForReview(prId: string, diff: DiffFile[]): Promise<void> {
         this.currentPrId = prId;
