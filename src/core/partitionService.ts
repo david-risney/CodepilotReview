@@ -194,6 +194,8 @@ export class PartitionService {
     ): Promise<Partition[]> {
         const criteria = 'Group changed files into logically related chunks based on dependency relationships. ' +
             'For example, data model changes, API changes, UI changes, test changes. ' +
+            'Aim for chunks of 20–100 lines of changed code each; up to 400 lines per chunk is acceptable for closely related changes. ' +
+            'Avoid very small chunks (under 20 lines) — prefer merging related small changes into one chunk rather than creating many tiny partitions. ' +
             'Order chunks so that foundational changes come first.';
 
         return this.partitionWithAi(prId, diff, 'dependency', criteria, token);
