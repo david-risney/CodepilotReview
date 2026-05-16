@@ -279,9 +279,6 @@ export class ChromiumProvider implements ICodeReviewProvider {
     async initialize(context: vscode.ExtensionContext): Promise<void> {
         if (this.instanceConfig?.host) {
             this.host = this.instanceConfig.host;
-        } else {
-            const config = vscode.workspace.getConfiguration('codepilotReview');
-            this.host = config.get<string>('chromium.host', this.host);
         }
         this.secretStorage = context.secrets;
 

@@ -43,54 +43,7 @@ export class ProviderManager {
      */
     getProviderConfigs(): ProviderInstanceConfig[] {
         const vsConfig = vscode.workspace.getConfiguration('codepilotReview');
-        const providers = vsConfig.get<ProviderInstanceConfig[]>('providers', []);
-
-        if (providers && providers.length > 0) {
-            return providers;
-        }
-
-        // Legacy: normalize single provider setting
-        const providerType = vsConfig.get<string>('provider', 'local') as ProviderType;
-        return [this.buildLegacyConfig(providerType, vsConfig)];
-    }
-
-    private buildLegacyConfig(
-        type: ProviderType,
-        vsConfig: vscode.WorkspaceConfiguration,
-    ): ProviderInstanceConfig {
-        const config: ProviderInstanceConfig = {
-            id: type,
-            label: this.displayNameForType(type),
-            type,
-        };
-
-        switch (type) {
-            case 'azureDevOps':
-                config.organization = vsConfig.get<string>('azureDevOps.organization', '');
-                config.project = vsConfig.get<string>('azureDevOps.project', '');
-                break;
-            case 'github':
-                config.owner = vsConfig.get<string>('github.owner', '');
-                config.repo = vsConfig.get<string>('github.repo', '');
-                break;
-            case 'chromium':
-                config.host = vsConfig.get<string>('chromium.host', '');
-                break;
-            case 'local':
-                config.baseBranch = vsConfig.get<string>('local.baseBranch', 'main');
-                break;
-        }
-
-        return config;
-    }
-
-    private displayNameForType(type: ProviderType): string {
-        switch (type) {
-            case 'azureDevOps': return 'Azure DevOps';
-            case 'github': return 'GitHub';
-            case 'chromium': return 'Chromium';
-            case 'local': return 'Local';
-        }
+        return vsConfig.get<ProviderInstanceConfig[]>('providers', []);
     }
 
     /** Initialize all providers from an array of configs. Disposes any existing providers first. */
