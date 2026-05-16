@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ProviderInstanceConfig, ProviderType } from '../types';
+import { ProviderInstanceConfig, ProviderType, ProviderView } from '../types';
 import { ICodeReviewProvider, ProviderInstance } from './provider';
 import { LocalProvider } from './localProvider';
 import { AzureDevOpsProvider } from './adoProvider';
@@ -133,16 +133,37 @@ export class ProviderManager {
             await this.authManager.ensureAuthenticated(config.id, provider.auth);
         }
 
+        // Normalize views — ensure at least a default "All" view
+        const views = this.normalizeViews(config);
+
         const instance: ProviderInstance = {
             id: config.id,
             displayName: config.label,
             type: config.type,
             provider,
+            views,
         };
 
         this.instances.set(config.id, instance);
-        logger.info(`Provider "${config.id}" (${config.type}) initialized`);
+        logger.info(`Provider "${config.id}" (${config.type}) initialized with ${views.length} view(s)`);
         return instance;
+    }
+
+    /** Ensure views array is populated; create default "All" view if empty. */
+    private normalizeViews(config: ProviderInstanceConfig): ProviderView[] {
+        if (config.views && config.views.length > 0) {
+            return config.views;
+        }
+        return [{ id: 'all', label: 'All', query: { type: config.type } as any }];
+    }
+
+    /** Update views for a provider instance (for view management commands). */
+    updateProviderViews(providerId: string, views: ProviderView[]): void {
+        const instance = this.instances.get(providerId);
+        if (instance) {
+            instance.views = views.length > 0 ? views : [{ id: 'all', label: 'All', query: { type: instance.type } as any }];
+            this._onDidChangeProviders.fire();
+        }
     }
 
     /** Remove and dispose a provider by ID. */

@@ -45,8 +45,26 @@
       },
       {
         "command": "codepilotReview.selectProvider",
-        "title": "Select Code Review Provider",
+        "title": "Manage Providers",
         "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.addView",
+        "title": "Add View",
+        "category": "CodepilotReview",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codepilotReview.editView",
+        "title": "Edit View",
+        "category": "CodepilotReview",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codepilotReview.removeView",
+        "title": "Remove View",
+        "category": "CodepilotReview",
+        "icon": "$(trash)"
       },
       {
         "command": "codepilotReview.acceptIssue",
@@ -239,6 +257,21 @@
           "command": "codepilotReview.fixIssue",
           "when": "viewItem =~ /reviewIssue:(suggested|draft)/",
           "group": "1_actions"
+        },
+        {
+          "command": "codepilotReview.addView",
+          "when": "viewItem == provider",
+          "group": "inline"
+        },
+        {
+          "command": "codepilotReview.editView",
+          "when": "viewItem == providerView",
+          "group": "inline"
+        },
+        {
+          "command": "codepilotReview.removeView",
+          "when": "viewItem == providerView",
+          "group": "inline"
         }
       ]
     },
@@ -295,7 +328,7 @@
           "type": "array",
           "default": [],
           "description": "Multiple provider instances to run simultaneously. Each entry configures one provider. When non-empty, this overrides the single 'provider' setting above.",
-          "markdownDescription": "Multiple provider instances to run simultaneously. When non-empty, overrides the single `#codepilotReview.provider#` setting.\n\nExample:\n```json\n[\n  {\n    \"id\": \"ado-edge\",\n    \"label\": \"Edge PRs\",\n    \"type\": \"azureDevOps\",\n    \"organization\": \"microsoft\",\n    \"project\": \"Edge\"\n  },\n  {\n    \"id\": \"github-vscode\",\n    \"label\": \"VS Code GitHub\",\n    \"type\": \"github\",\n    \"owner\": \"microsoft\",\n    \"repo\": \"vscode\"\n  }\n]\n```",
+          "markdownDescription": "Code review provider instances. Each entry configures one provider with its connection settings and optional views (saved searches).\n\nExample:\n```json\n[\n  {\n    \"id\": \"ado-edge\",\n    \"label\": \"Edge PRs\",\n    \"type\": \"azureDevOps\",\n    \"organization\": \"microsoft\",\n    \"project\": \"Edge\",\n    \"views\": [\n      { \"id\": \"my-prs\", \"label\": \"My PRs\", \"query\": { \"type\": \"azureDevOps\", \"creatorId\": \"me\" } },\n      { \"id\": \"needs-review\", \"label\": \"Needs Review\", \"query\": { \"type\": \"azureDevOps\", \"reviewerId\": \"me\" } }\n    ]\n  },\n  {\n    \"id\": \"github-vscode\",\n    \"label\": \"VS Code GitHub\",\n    \"type\": \"github\",\n    \"owner\": \"microsoft\",\n    \"repo\": \"vscode\"\n  }\n]\n```",
           "items": {
             "type": "object",
             "required": ["id", "label", "type"],
@@ -340,6 +373,49 @@
               "baseBranch": {
                 "type": "string",
                 "description": "(Local) Base branch for diff comparison (e.g. 'main')"
+              },
+              "views": {
+                "type": "array",
+                "description": "Saved search views for this provider. If empty, a default 'All' view is created.",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "label"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique view identifier within this provider (e.g. 'my-prs', 'team-reviews')"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Display label for this view (e.g. 'My PRs', 'Needs Review')"
+                    },
+                    "query": {
+                      "type": "object",
+                      "description": "Provider-specific search criteria. Shape varies by provider type.",
+                      "properties": {
+                        "type": { "type": "string", "enum": ["azureDevOps", "github", "chromium", "local"] },
+                        "status": { "type": "string", "description": "(ADO/Chromium) Status filter" },
+                        "creatorId": { "type": "string", "description": "(ADO) Creator user ID or name" },
+                        "reviewerId": { "type": "string", "description": "(ADO) Reviewer user ID or name" },
+                        "repositoryId": { "type": "string", "description": "(ADO) Repository ID to scope" },
+                        "searchQuery": { "type": "string", "description": "(GitHub) Search query string" },
+                        "state": { "type": "string", "description": "(GitHub) PR state: open, closed, all" },
+                        "author": { "type": "string", "description": "(GitHub) Author filter" },
+                        "owner": { "type": "string", "description": "(Chromium) Owner filter" }
+                      }
+                    },
+                    "filter": {
+                      "type": "object",
+                      "description": "Client-side filters applied after fetching.",
+                      "properties": {
+                        "text": { "type": "string", "description": "Text search across title, author, description" },
+                        "statuses": { "type": "array", "items": { "type": "string" }, "description": "Filter by PR status" },
+                        "userNeed": { "type": "array", "items": { "type": "string" }, "description": "Filter by user need level" },
+                        "priority": { "type": "array", "items": { "type": "string" }, "description": "Filter by priority" }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

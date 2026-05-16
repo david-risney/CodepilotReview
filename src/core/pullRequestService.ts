@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PullRequest, PullRequestStatus, ReviewPriority, UserNeedLevel } from '../types';
+import { PullRequest, PullRequestStatus, ReviewPriority, UserNeedLevel, ProviderViewQuery, LocalFilter } from '../types';
 import { ICodeReviewProvider, PullRequestFilter, ProviderInstance } from '../providers/provider';
 import { IAiService } from '../ai/aiService';
 import { logger } from '../logging/logger';
@@ -23,6 +23,7 @@ export class PullRequestService {
             displayName: provider.name,
             type: provider.name as any,
             provider,
+            views: [{ id: 'all', label: 'All' }],
         }];
         this.cachedPRs.clear();
     }
@@ -39,6 +40,103 @@ export class PullRequestService {
     /** Get the provider instance for a given provider ID */
     getProviderById(id: string): ProviderInstance | undefined {
         return this.providers.find(p => p.id === id);
+    }
+
+    /**
+     * Get PRs for a specific view within a provider.
+     * Translates the ProviderViewQuery into provider-specific API filter,
+     * then applies optional LocalFilter client-side.
+     */
+    async getPullRequestsForView(
+        providerId: string,
+        viewId: string,
+        query?: ProviderViewQuery,
+        localFilter?: LocalFilter,
+    ): Promise<PullRequest[]> {
+        const instance = this.providers.find(p => p.id === providerId);
+        if (!instance) {
+            logger.warn(`Provider "${providerId}" not found`);
+            return [];
+        }
+
+        const cacheKey = `${providerId}:${viewId}`;
+
+        try {
+            const apiFilter = this.translateQuery(query);
+            const prs = await instance.provider.pullRequests.getPullRequests(apiFilter);
+            this.cachedPRs.set(cacheKey, prs);
+        } catch (error) {
+            logger.error(`Failed to fetch PRs for view "${viewId}" from "${providerId}"`, error);
+            // Fall back to cached
+            if (!this.cachedPRs.has(cacheKey)) {
+                return [];
+            }
+        }
+
+        let results = this.cachedPRs.get(cacheKey) || [];
+
+        // Apply local filters
+        if (localFilter) {
+            results = this.applyLocalFilter(results, localFilter);
+        }
+
+        // Enrich with AI in background
+        this.enrichPrsWithAi(results);
+
+        return results;
+    }
+
+    /** Translate a ProviderViewQuery into a generic PullRequestFilter for the provider API */
+    private translateQuery(query?: ProviderViewQuery): PullRequestFilter | undefined {
+        if (!query) { return undefined; }
+
+        switch (query.type) {
+            case 'azureDevOps':
+                return {
+                    status: query.status ? [query.status] : undefined,
+                    author: query.creatorId,
+                    reviewer: query.reviewerId,
+                };
+            case 'github':
+                return {
+                    status: query.state ? [query.state] : undefined,
+                    author: query.author,
+                    searchText: query.searchQuery,
+                };
+            case 'chromium':
+                return {
+                    status: query.status ? [query.status] : undefined,
+                    author: query.owner,
+                };
+            case 'local':
+            default:
+                return undefined;
+        }
+    }
+
+    /** Apply local (client-side) filters to a PR list */
+    private applyLocalFilter(prs: PullRequest[], filter: LocalFilter): PullRequest[] {
+        return prs.filter(pr => {
+            if (filter.text) {
+                const text = filter.text.toLowerCase();
+                const matches =
+                    pr.title.toLowerCase().includes(text) ||
+                    pr.description.toLowerCase().includes(text) ||
+                    pr.author.toLowerCase().includes(text) ||
+                    pr.labels.some(l => l.toLowerCase().includes(text));
+                if (!matches) { return false; }
+            }
+            if (filter.statuses && filter.statuses.length > 0) {
+                if (!filter.statuses.includes(pr.status)) { return false; }
+            }
+            if (filter.userNeed && filter.userNeed.length > 0) {
+                if (!filter.userNeed.includes(pr.userNeed)) { return false; }
+            }
+            if (filter.priority && filter.priority.length > 0) {
+                if (!pr.priority || !filter.priority.includes(pr.priority)) { return false; }
+            }
+            return true;
+        });
     }
 
     async getPullRequests(filter?: PullRequestFilter): Promise<PullRequest[]> {

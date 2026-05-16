@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import {
-    PullRequest, DiffFile, ReviewIssue, ProviderCapabilities, ReviewIssueStatus, ProviderType
+    PullRequest, DiffFile, ReviewIssue, ProviderCapabilities, ReviewIssueStatus, ProviderType, ProviderView
 } from '../types';
 
 /**
@@ -95,4 +95,6 @@ export interface ProviderInstance {
     type: ProviderType;
     /** The actual provider implementation */
     provider: ICodeReviewProvider;
+    /** Configured views (saved searches) */
+    views: ProviderView[];
 }

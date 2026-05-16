@@ -1,156 +1,235 @@
 import * as vscode from 'vscode';
-import { PullRequest, PullRequestStatus, UserNeedLevel, ReviewPriority } from '../types';
+import { PullRequest, PullRequestStatus, UserNeedLevel, ReviewPriority, ProviderView, LocalFilter } from '../types';
 import { PullRequestService } from '../core/pullRequestService';
+import { ProviderInstance } from '../providers/provider';
+
+/**
+ * Tree node types for the PR list view hierarchy:
+ * Provider → View → PR → Details
+ */
+type TreeNode = ProviderTreeNode | ViewTreeNode | PrTreeNode | DetailTreeNode;
 
 /**
  * TreeDataProvider for the Pull Request list view.
- * Supports filtering and displays PR metadata including AI-generated info.
- * Shows PRs from all active providers with provider labels.
+ * Shows a hierarchy: Provider → Views → PRs → PR Details.
  */
-export class PrListViewProvider implements vscode.TreeDataProvider<PrTreeItem> {
-    private _onDidChangeTreeData = new vscode.EventEmitter<PrTreeItem | undefined | void>();
+export class PrListViewProvider implements vscode.TreeDataProvider<TreeNode> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-    private filterText: string = '';
-    private statusFilter: PullRequestStatus[] = [];
-    private userNeedFilter: UserNeedLevel[] = [];
-    private priorityFilter: ReviewPriority[] = [];
-    private providerFilter: string[] = [];
+    private providers: ProviderInstance[] = [];
 
     constructor(private prService: PullRequestService) {}
+
+    setProviders(providers: ProviderInstance[]): void {
+        this.providers = providers;
+        this.refresh();
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
     }
 
-    setFilter(text: string): void {
-        this.filterText = text.toLowerCase();
-        this.refresh();
+    /** Refresh a specific view node only */
+    refreshView(viewNode: ViewTreeNode): void {
+        this._onDidChangeTreeData.fire(viewNode);
     }
 
-    setStatusFilter(statuses: PullRequestStatus[]): void {
-        this.statusFilter = statuses;
-        this.refresh();
-    }
-
-    setUserNeedFilter(needs: UserNeedLevel[]): void {
-        this.userNeedFilter = needs;
-        this.refresh();
-    }
-
-    setPriorityFilter(priorities: ReviewPriority[]): void {
-        this.priorityFilter = priorities;
-        this.refresh();
-    }
-
-    setProviderFilter(providerIds: string[]): void {
-        this.providerFilter = providerIds;
-        this.refresh();
-    }
-
-    getTreeItem(element: PrTreeItem): vscode.TreeItem {
+    getTreeItem(element: TreeNode): vscode.TreeItem {
         return element;
     }
 
-    async getChildren(element?: PrTreeItem): Promise<PrTreeItem[]> {
-        if (element) {
+    async getChildren(element?: TreeNode): Promise<TreeNode[]> {
+        if (!element) {
+            // Root level: show providers
+            return this.providers.map(p => new ProviderTreeNode(p));
+        }
+
+        if (element instanceof ProviderTreeNode) {
+            // Provider level: show views
+            return element.instance.views.map(v => new ViewTreeNode(element.instance, v));
+        }
+
+        if (element instanceof ViewTreeNode) {
+            // View level: fetch and show PRs
+            const prs = await this.prService.getPullRequestsForView(
+                element.instance.id,
+                element.view.id,
+                element.view.query,
+                element.view.filter,
+            );
+            return prs.map(pr => new PrTreeNode(pr));
+        }
+
+        if (element instanceof PrTreeNode) {
+            // PR level: show details
             return this.getPrDetails(element.pr);
         }
 
-        const prs = await this.prService.getPullRequests();
-        let filtered = prs;
-
-        if (this.filterText) {
-            filtered = filtered.filter(pr =>
-                pr.title.toLowerCase().includes(this.filterText) ||
-                pr.description.toLowerCase().includes(this.filterText) ||
-                pr.author.toLowerCase().includes(this.filterText) ||
-                pr.labels.some(l => l.toLowerCase().includes(this.filterText))
-            );
-        }
-
-        if (this.statusFilter.length > 0) {
-            filtered = filtered.filter(pr => this.statusFilter.includes(pr.status));
-        }
-
-        if (this.userNeedFilter.length > 0) {
-            filtered = filtered.filter(pr => this.userNeedFilter.includes(pr.userNeed));
-        }
-
-        if (this.priorityFilter.length > 0) {
-            filtered = filtered.filter(pr => pr.priority && this.priorityFilter.includes(pr.priority));
-        }
-
-        if (this.providerFilter.length > 0) {
-            filtered = filtered.filter(pr => this.providerFilter.includes(pr.providerId));
-        }
-
-        return filtered.map(pr => new PrTreeItem(pr));
+        return [];
     }
 
-    private getPrDetails(pr: PullRequest): PrTreeItem[] {
-        const details: PrTreeItem[] = [];
+    getParent(element: TreeNode): TreeNode | undefined {
+        // Required for reveal() to work
+        if (element instanceof ViewTreeNode) {
+            const provider = this.providers.find(p => p.id === element.instance.id);
+            return provider ? new ProviderTreeNode(provider) : undefined;
+        }
+        if (element instanceof PrTreeNode) {
+            // Can't easily resolve parent without storing it
+            return undefined;
+        }
+        return undefined;
+    }
 
-        details.push(PrTreeItem.detail('Author', pr.author));
-        details.push(PrTreeItem.detail('Provider', pr.providerName || pr.providerId));
-        details.push(PrTreeItem.detail('Branch', `${pr.sourceBranch} → ${pr.targetBranch}`));
-        details.push(PrTreeItem.detail('Status', pr.status));
-        details.push(PrTreeItem.detail('User Need', pr.userNeed));
+    private getPrDetails(pr: PullRequest): DetailTreeNode[] {
+        const details: DetailTreeNode[] = [];
+
+        details.push(new DetailTreeNode('Author', pr.author));
+        details.push(new DetailTreeNode('Branch', `${pr.sourceBranch} → ${pr.targetBranch}`));
+        details.push(new DetailTreeNode('Status', pr.status));
+        details.push(new DetailTreeNode('User Need', pr.userNeed));
 
         if (pr.priority) {
-            details.push(PrTreeItem.detail('Priority', pr.priority));
+            details.push(new DetailTreeNode('Priority', pr.priority));
         }
         if (pr.aiSummary) {
-            details.push(PrTreeItem.detail('Summary', pr.aiSummary));
+            details.push(new DetailTreeNode('Summary', pr.aiSummary));
         }
         if (pr.reviewers.length > 0) {
-            details.push(PrTreeItem.detail('Reviewers', pr.reviewers.map(r => r.name).join(', ')));
+            details.push(new DetailTreeNode('Reviewers', pr.reviewers.map(r => r.name).join(', ')));
         }
         if (pr.relevantLinks && pr.relevantLinks.length > 0) {
-            details.push(PrTreeItem.detail('Links', pr.relevantLinks.map(l => l.title).join(', ')));
+            details.push(new DetailTreeNode('Links', pr.relevantLinks.map(l => l.title).join(', ')));
         }
 
         return details;
     }
-}
 
-export class PrTreeItem extends vscode.TreeItem {
-    constructor(
-        public readonly pr: PullRequest,
-        public readonly isDetail: boolean = false,
-    ) {
-        super(
-            pr.title,
-            isDetail
-                ? vscode.TreeItemCollapsibleState.None
-                : vscode.TreeItemCollapsibleState.Collapsed
-        );
+    // --- Legacy filter methods (kept for backward compat with filter command) ---
 
-        if (!isDetail) {
-            const providerLabel = pr.providerName && pr.providerName !== pr.providerId
-                ? ` · ${pr.providerName}`
-                : (pr.providerId ? ` · ${pr.providerId}` : '');
-            this.description = `${pr.author} · ${pr.status}${providerLabel}`;
-            this.tooltip = this.buildTooltip(pr);
-            this.contextValue = 'pullRequest';
-            this.iconPath = this.getStatusIcon(pr.status);
-
-            this.command = {
-                command: 'codepilotReview.openReview',
-                title: 'Open Review',
-                arguments: [pr],
-            };
+    setFilter(text: string): void {
+        // Apply as transient text filter to all views — not persisted
+        for (const provider of this.providers) {
+            for (const view of provider.views) {
+                if (!view.filter) { view.filter = {}; }
+                view.filter.text = text.toLowerCase() || undefined;
+            }
         }
+        this.refresh();
     }
 
-    static detail(label: string, value: string): PrTreeItem {
-        const dummyPr: PullRequest = {
-            id: '', title: `${label}: ${value}`, description: '', author: '',
-            status: 'open', sourceBranch: '', targetBranch: '',
-            createdAt: new Date(), updatedAt: new Date(),
-            reviewers: [], labels: [], userNeed: 'optional', providerName: '', providerId: '',
+    setStatusFilter(statuses: PullRequestStatus[]): void {
+        for (const provider of this.providers) {
+            for (const view of provider.views) {
+                if (!view.filter) { view.filter = {}; }
+                view.filter.statuses = statuses.length > 0 ? statuses : undefined;
+            }
+        }
+        this.refresh();
+    }
+
+    setUserNeedFilter(needs: UserNeedLevel[]): void {
+        for (const provider of this.providers) {
+            for (const view of provider.views) {
+                if (!view.filter) { view.filter = {}; }
+                view.filter.userNeed = needs.length > 0 ? needs : undefined;
+            }
+        }
+        this.refresh();
+    }
+
+    setPriorityFilter(priorities: ReviewPriority[]): void {
+        for (const provider of this.providers) {
+            for (const view of provider.views) {
+                if (!view.filter) { view.filter = {}; }
+                view.filter.priority = priorities.length > 0 ? priorities : undefined;
+            }
+        }
+        this.refresh();
+    }
+
+    setProviderFilter(_providerIds: string[]): void {
+        // No longer needed with hierarchical view; kept for interface compat
+        this.refresh();
+    }
+}
+
+// ── Tree Node Classes ───────────────────────────────────────────────────────
+
+export class ProviderTreeNode extends vscode.TreeItem {
+    readonly contextValue = 'provider';
+
+    constructor(public readonly instance: ProviderInstance) {
+        super(instance.displayName, vscode.TreeItemCollapsibleState.Expanded);
+        this.description = instance.type;
+        this.iconPath = this.getProviderIcon(instance.type);
+        this.tooltip = `${instance.displayName} (${instance.type}) — ${instance.views.length} view(s)`;
+    }
+
+    private getProviderIcon(type: string): vscode.ThemeIcon {
+        switch (type) {
+            case 'azureDevOps': return new vscode.ThemeIcon('azure');
+            case 'github': return new vscode.ThemeIcon('github');
+            case 'chromium': return new vscode.ThemeIcon('globe');
+            case 'local': return new vscode.ThemeIcon('git-branch');
+            default: return new vscode.ThemeIcon('plug');
+        }
+    }
+}
+
+export class ViewTreeNode extends vscode.TreeItem {
+    readonly contextValue = 'providerView';
+
+    constructor(
+        public readonly instance: ProviderInstance,
+        public readonly view: ProviderView,
+    ) {
+        super(view.label, vscode.TreeItemCollapsibleState.Expanded);
+        this.description = this.buildDescription();
+        this.iconPath = new vscode.ThemeIcon('filter');
+        this.tooltip = this.buildTooltip();
+    }
+
+    private buildDescription(): string {
+        const parts: string[] = [];
+        if (this.view.query) {
+            const q = this.view.query;
+            if (q.type === 'azureDevOps' && q.status) { parts.push(q.status); }
+            if (q.type === 'github' && q.searchQuery) { parts.push(q.searchQuery); }
+            if (q.type === 'chromium' && q.status) { parts.push(q.status); }
+        }
+        if (this.view.filter?.text) { parts.push(`"${this.view.filter.text}"`); }
+        return parts.join(' · ') || '';
+    }
+
+    private buildTooltip(): string {
+        let tip = `View: ${this.view.label}`;
+        if (this.view.query) {
+            tip += `\nQuery: ${JSON.stringify(this.view.query, null, 2)}`;
+        }
+        if (this.view.filter) {
+            tip += `\nFilter: ${JSON.stringify(this.view.filter)}`;
+        }
+        return tip;
+    }
+}
+
+export class PrTreeNode extends vscode.TreeItem {
+    readonly contextValue = 'pullRequest';
+
+    constructor(public readonly pr: PullRequest) {
+        super(pr.title, vscode.TreeItemCollapsibleState.Collapsed);
+
+        this.description = `${pr.author} · ${pr.status}`;
+        this.tooltip = this.buildTooltip(pr);
+        this.iconPath = this.getStatusIcon(pr.status);
+
+        this.command = {
+            command: 'codepilotReview.openReview',
+            title: 'Open Review',
+            arguments: [pr],
         };
-        return new PrTreeItem(dummyPr, true);
     }
 
     private buildTooltip(pr: PullRequest): vscode.MarkdownString {
@@ -177,3 +256,15 @@ export class PrTreeItem extends vscode.TreeItem {
         }
     }
 }
+
+export class DetailTreeNode extends vscode.TreeItem {
+    readonly contextValue = 'prDetail';
+
+    constructor(label: string, value: string) {
+        super(`${label}: ${value}`, vscode.TreeItemCollapsibleState.None);
+        this.iconPath = new vscode.ThemeIcon('info');
+    }
+}
+
+// Keep PrTreeItem as an alias for backward compatibility with tests
+export { PrTreeNode as PrTreeItem };

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReviewIssue, PullRequestStatus, ReviewPriority, UserNeedLevel } from './types';
+import { ReviewIssue, PullRequestStatus, ReviewPriority, UserNeedLevel, ProviderView, ProviderViewQuery } from './types';
 import { Configuration } from './config/configuration';
 import { ProviderManager } from './providers/providerManager';
 import { PullRequestService } from './core/pullRequestService';
@@ -7,7 +7,7 @@ import { ReviewSessionService } from './core/reviewSessionService';
 import { PartitionService } from './core/partitionService';
 import { CodeTourService } from './core/codeTourService';
 import { ReviewerSuggestionService } from './core/reviewerSuggestionService';
-import { PrListViewProvider } from './views/prListView';
+import { PrListViewProvider, ProviderTreeNode, ViewTreeNode } from './views/prListView';
 import { ReviewIssuesViewProvider } from './views/reviewIssuesView';
 import { PartitionViewProvider } from './views/partitionView';
 import { ChatPanel } from './views/chatPanel';
@@ -124,9 +124,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const syncProviders = () => {
         const instances = providerManager.getAllProviders();
         prService.setProviders(instances);
+        prListView.setProviders(instances);
         // Comment controller: allow local commenting if any provider is local type
         commentController.setLocalProvider(instances.some(p => p.type === 'local'));
-        prListView.refresh();
     };
     providerManager.onDidChangeProviders(syncProviders);
 
@@ -254,6 +254,115 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
 
+        // --- View Management Commands ---
+        vscode.commands.registerCommand('codepilotReview.addView', async (node?: ProviderTreeNode) => {
+            let providerId: string | undefined;
+            if (node instanceof ProviderTreeNode) {
+                providerId = node.instance.id;
+            } else {
+                // Pick a provider
+                const active = providerManager.getAllProviders();
+                if (active.length === 0) { return; }
+                if (active.length === 1) {
+                    providerId = active[0].id;
+                } else {
+                    const selected = await vscode.window.showQuickPick(
+                        active.map(p => ({ label: p.displayName, description: p.id, value: p.id })),
+                        { placeHolder: 'Add view to which provider?' },
+                    );
+                    if (!selected) { return; }
+                    providerId = selected.value;
+                }
+            }
+
+            const instance = providerManager.getProvider(providerId!);
+            if (!instance) { return; }
+
+            const label = await vscode.window.showInputBox({
+                prompt: 'View label',
+                placeHolder: 'e.g. My PRs, Needs Review',
+            });
+            if (!label) { return; }
+
+            const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+            // Build query based on provider type
+            let query: ProviderViewQuery | undefined;
+            if (instance.type === 'azureDevOps') {
+                const status = await vscode.window.showQuickPick(
+                    ['', 'active', 'completed', 'abandoned'].map(s => ({ label: s || '(all)', value: s })),
+                    { placeHolder: 'Filter by status?' },
+                );
+                const creatorId = await vscode.window.showInputBox({ prompt: 'Filter by creator? (leave empty for all)' });
+                const reviewerId = await vscode.window.showInputBox({ prompt: 'Filter by reviewer? (leave empty for all)' });
+                query = {
+                    type: 'azureDevOps',
+                    ...(status?.value ? { status: status.value } : {}),
+                    ...(creatorId ? { creatorId } : {}),
+                    ...(reviewerId ? { reviewerId } : {}),
+                };
+            } else if (instance.type === 'github') {
+                const searchQuery = await vscode.window.showInputBox({
+                    prompt: 'GitHub search query (leave empty for all)',
+                    placeHolder: 'e.g. is:open review-requested:@me',
+                });
+                const state = await vscode.window.showQuickPick(
+                    ['', 'open', 'closed', 'all'].map(s => ({ label: s || '(default: open)', value: s })),
+                    { placeHolder: 'PR state?' },
+                );
+                query = {
+                    type: 'github',
+                    ...(searchQuery ? { searchQuery } : {}),
+                    ...(state?.value ? { state: state.value } : {}),
+                };
+            } else if (instance.type === 'chromium') {
+                const status = await vscode.window.showInputBox({ prompt: 'Gerrit status filter (leave empty for all)' });
+                query = { type: 'chromium', ...(status ? { status } : {}) };
+            } else {
+                query = { type: 'local' };
+            }
+
+            const newView: ProviderView = { id, label, query };
+            const views = [...instance.views, newView];
+            providerManager.updateProviderViews(providerId!, views);
+            vscode.window.showInformationMessage(`Added view "${label}"`);
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.editView', async (node?: ViewTreeNode) => {
+            if (!(node instanceof ViewTreeNode)) { return; }
+
+            const view = node.view;
+            const newLabel = await vscode.window.showInputBox({
+                prompt: 'View label',
+                value: view.label,
+            });
+            if (!newLabel) { return; }
+
+            const instance = providerManager.getProvider(node.instance.id);
+            if (!instance) { return; }
+
+            const views = instance.views.map(v =>
+                v.id === view.id ? { ...v, label: newLabel } : v
+            );
+            providerManager.updateProviderViews(node.instance.id, views);
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.removeView', async (node?: ViewTreeNode) => {
+            if (!(node instanceof ViewTreeNode)) { return; }
+
+            const instance = providerManager.getProvider(node.instance.id);
+            if (!instance) { return; }
+
+            if (instance.views.length <= 1) {
+                vscode.window.showWarningMessage('Cannot remove the last view');
+                return;
+            }
+
+            const views = instance.views.filter(v => v.id !== node.view.id);
+            providerManager.updateProviderViews(node.instance.id, views);
+            vscode.window.showInformationMessage(`Removed view "${node.view.label}"`);
+        }),
+
         vscode.commands.registerCommand('codepilotReview.filterPRs', async () => {
             const filterType = await vscode.window.showQuickPick(
                 [
@@ -261,7 +370,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     { label: '$(filter) Status', description: 'Filter by PR status', value: 'status' },
                     { label: '$(person) User Need', description: 'Filter by how much your attention is needed', value: 'userNeed' },
                     { label: '$(arrow-up) Priority', description: 'Filter by AI-assessed priority', value: 'priority' },
-                    { label: '$(plug) Provider', description: 'Filter by provider instance', value: 'provider' },
                     { label: '$(close) Clear Filters', description: 'Remove all filters', value: 'clear' },
                 ],
                 { placeHolder: 'Choose filter type' }
@@ -320,23 +428,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     prListView.setStatusFilter([]);
                     prListView.setUserNeedFilter([]);
                     prListView.setPriorityFilter([]);
-                    prListView.setProviderFilter([]);
                     break;
-                case 'provider': {
-                    const active = providerManager.getAllProviders();
-                    if (active.length <= 1) {
-                        vscode.window.showInformationMessage('Only one provider is active');
-                        return;
-                    }
-                    const selected = await vscode.window.showQuickPick(
-                        active.map(p => ({ label: p.displayName, description: p.id, picked: false })),
-                        { canPickMany: true, placeHolder: 'Select providers to show' }
-                    );
-                    if (selected) {
-                        prListView.setProviderFilter(selected.map(s => s.description!));
-                    }
-                    break;
-                }
             }
         }),
 

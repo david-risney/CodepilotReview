@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { ProviderManager } from '../../providers/providerManager';
 import { ProviderInstance } from '../../providers/provider';
-import { ProviderInstanceConfig, ProviderType } from '../../types';
+import { ProviderInstanceConfig, ProviderType, ProviderView } from '../../types';
 
 // Minimal mock context for provider initialization
 function mockContext(): any {
@@ -199,5 +199,49 @@ suite('ProviderManager', () => {
         assert.ok(manager.getProvider('local-1'));
         assert.ok(manager.getProvider('local-2'));
         assert.ok(manager.hasProviderOfType('local'));
+    });
+
+    test('addProvider creates default "All" view when no views configured', async () => {
+        const instance = await manager.addProvider({ id: 'v1', label: 'V1', type: 'local' });
+        assert.strictEqual(instance.views.length, 1);
+        assert.strictEqual(instance.views[0].id, 'all');
+        assert.strictEqual(instance.views[0].label, 'All');
+    });
+
+    test('addProvider preserves configured views', async () => {
+        const views = [
+            { id: 'my-prs', label: 'My PRs', query: { type: 'azureDevOps' as const, creatorId: 'me' } },
+            { id: 'reviews', label: 'Reviews', query: { type: 'azureDevOps' as const, reviewerId: 'me' } },
+        ];
+        const instance = await manager.addProvider({
+            id: 'v2', label: 'V2', type: 'azureDevOps', views,
+            organization: 'test', project: 'test',
+        });
+        assert.strictEqual(instance.views.length, 2);
+        assert.strictEqual(instance.views[0].id, 'my-prs');
+        assert.strictEqual(instance.views[1].id, 'reviews');
+    });
+
+    test('updateProviderViews updates and fires event', async () => {
+        await manager.addProvider({ id: 'uv', label: 'UV', type: 'local' });
+        let fired = false;
+        manager.onDidChangeProviders(() => { fired = true; });
+
+        manager.updateProviderViews('uv', [
+            { id: 'custom', label: 'Custom View' },
+        ]);
+
+        const inst = manager.getProvider('uv');
+        assert.strictEqual(inst!.views.length, 1);
+        assert.strictEqual(inst!.views[0].id, 'custom');
+        assert.ok(fired);
+    });
+
+    test('updateProviderViews with empty array creates default view', async () => {
+        await manager.addProvider({ id: 'uv2', label: 'UV2', type: 'github' });
+        manager.updateProviderViews('uv2', []);
+        const inst = manager.getProvider('uv2');
+        assert.strictEqual(inst!.views.length, 1);
+        assert.strictEqual(inst!.views[0].id, 'all');
     });
 });

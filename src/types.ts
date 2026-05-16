@@ -221,6 +221,33 @@ export interface ProviderCapabilities {
 
 export type ProviderType = 'local' | 'azureDevOps' | 'github' | 'chromium';
 
+/** A saved search/view for a provider */
+export interface ProviderView {
+    /** Unique identifier within the provider */
+    id: string;
+    /** Display label */
+    label: string;
+    /** Provider-specific search criteria passed to the API */
+    query?: ProviderViewQuery;
+    /** Local filters applied client-side after fetch */
+    filter?: LocalFilter;
+}
+
+/** Provider-specific query — varies by type */
+export type ProviderViewQuery =
+    | { type: 'azureDevOps'; status?: string; creatorId?: string; reviewerId?: string; repositoryId?: string }
+    | { type: 'github'; searchQuery?: string; state?: string; author?: string }
+    | { type: 'chromium'; status?: string; owner?: string }
+    | { type: 'local' };
+
+/** Client-side filter applied after fetching PRs */
+export interface LocalFilter {
+    text?: string;
+    statuses?: PullRequestStatus[];
+    userNeed?: UserNeedLevel[];
+    priority?: ReviewPriority[];
+}
+
 /** Configuration for a single provider instance */
 export interface ProviderInstanceConfig {
     /** Unique identifier for this provider instance */
@@ -229,6 +256,8 @@ export interface ProviderInstanceConfig {
     label: string;
     /** Provider type */
     type: ProviderType;
+    /** Configured views (saved searches). If empty, a default "All" view is created. */
+    views?: ProviderView[];
     // ADO-specific
     organization?: string;
     project?: string;
