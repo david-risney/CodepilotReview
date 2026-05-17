@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PullRequest, PullRequestStatus, ReviewPriority, UserNeedLevel, ProviderViewQuery, LocalFilter } from '../types';
+import { PullRequest, PullRequestStatus, ReviewPriority, UserNeedLevel, ProviderViewQuery, LocalFilter, RelevantLink } from '../types';
 import { ICodeReviewProvider, PullRequestFilter, ProviderInstance } from '../providers/provider';
 import { IAiService } from '../ai/aiService';
 import { logger } from '../logging/logger';
@@ -15,8 +15,21 @@ export class PullRequestService {
     private _enriching = false;
     private _enrichQueue: PullRequest[] | undefined;
 
+    // Central enrichment cache keyed by "providerId:prId" — survives view cache overwrites
+    private enrichmentCache = new Map<string, {
+        aiSummary?: string;
+        priority?: ReviewPriority;
+        relevantLinks?: RelevantLink[];
+        userNeed?: UserNeedLevel;
+        attempted: boolean; // true once enrichment was tried (even if no summary returned)
+    }>();
+
     private _onDidEnrich = new vscode.EventEmitter<void>();
     readonly onDidEnrich = this._onDidEnrich.event;
+
+    private enrichmentKey(pr: PullRequest): string {
+        return `${pr.providerId}:${pr.id}`;
+    }
 
     /** @deprecated Use setProviders() for multi-provider support */
     setProvider(provider: ICodeReviewProvider): void {
@@ -30,15 +43,42 @@ export class PullRequestService {
             config,
         }];
         this.cachedPRs.clear();
+        this.enrichmentCache.clear();
     }
 
     setProviders(providers: ProviderInstance[]): void {
         this.providers = providers;
         this.cachedPRs.clear();
+        this.enrichmentCache.clear();
     }
 
     setAiService(aiService: IAiService): void {
         this.aiService = aiService;
+    }
+
+    /** Apply cached enrichment data to fresh PR objects */
+    private hydrateFromEnrichmentCache(prs: PullRequest[]): void {
+        let hydrated = 0;
+        for (const pr of prs) {
+            const cached = this.enrichmentCache.get(this.enrichmentKey(pr));
+            if (cached) {
+                if (cached.aiSummary) { pr.aiSummary = pr.aiSummary ?? cached.aiSummary; }
+                if (cached.priority) { pr.priority = pr.priority ?? cached.priority; }
+                if (cached.relevantLinks) { pr.relevantLinks = pr.relevantLinks ?? cached.relevantLinks; }
+                if (cached.userNeed && !pr.userNeed) { pr.userNeed = cached.userNeed; }
+                hydrated++;
+            }
+        }
+        if (hydrated > 0) {
+            logger.info(`hydrateFromEnrichmentCache: applied to ${hydrated}/${prs.length} PRs`);
+        }
+    }
+
+    /** Check if a PR needs enrichment (not yet attempted or not already enriched) */
+    private needsEnrichment(pr: PullRequest): boolean {
+        if (pr.aiSummary) { return false; }
+        const cached = this.enrichmentCache.get(this.enrichmentKey(pr));
+        return !cached?.attempted;
     }
 
     /** Get the provider instance for a given provider ID */
@@ -64,27 +104,14 @@ export class PullRequestService {
         }
 
         const cacheKey = `${providerId}:${viewId}`;
+        logger.info(`getPullRequestsForView: ${cacheKey} (fetching from API)`);
 
         try {
             const apiFilter = this.translateQuery(query);
             const freshPrs = await instance.provider.pullRequests.getPullRequests(apiFilter);
 
-            // Preserve AI enrichment data from previously cached PRs
-            const oldPrs = this.cachedPRs.get(cacheKey);
-            if (oldPrs) {
-                const oldById = new Map(oldPrs.map(p => [p.id, p]));
-                for (const pr of freshPrs) {
-                    const old = oldById.get(pr.id);
-                    if (old) {
-                        pr.aiSummary = pr.aiSummary ?? old.aiSummary;
-                        pr.priority = pr.priority ?? old.priority;
-                        pr.relevantLinks = pr.relevantLinks ?? old.relevantLinks;
-                        if (old.userNeed && !pr.userNeed) {
-                            pr.userNeed = old.userNeed;
-                        }
-                    }
-                }
-            }
+            // Hydrate fresh PRs from central enrichment cache
+            this.hydrateFromEnrichmentCache(freshPrs);
 
             this.cachedPRs.set(cacheKey, freshPrs);
         } catch (error) {
@@ -220,8 +247,16 @@ export class PullRequestService {
             return;
         }
 
+        const toEnrich = prs.filter(p => this.needsEnrichment(p));
+        logger.info(`enrichPrsWithAi: ${prs.length} PRs, ${toEnrich.length} need enrichment, ${prs.length - toEnrich.length} already done/attempted`);
+
+        if (toEnrich.length === 0) {
+            return;
+        }
+
         // Prevent concurrent enrichment runs — queue for later
         if (this._enriching) {
+            logger.info('enrichPrsWithAi: already running, queuing');
             this._enrichQueue = prs;
             return;
         }
@@ -230,39 +265,59 @@ export class PullRequestService {
         try {
             let enrichedAny = false;
 
-            for (const pr of prs) {
-                // Skip if already enriched
-                if (pr.aiSummary) { continue; }
+            for (const pr of toEnrich) {
+                const key = this.enrichmentKey(pr);
 
                 try {
-                    // Look up the correct provider for this PR
                     const instance = this.providers.find(p => p.id === pr.providerId);
-                    if (!instance) { continue; }
-
-                    const diff = await instance.provider.diff.getDiff(pr.id);
-                    if (!diff || diff.length === 0) { continue; }
-
-                    const response = await this.aiService.summarizeDiff(diff);
-                    const parsed = this.parseSummarizeResponse(response);
-
-                    pr.aiSummary = parsed.summary || undefined;
-                    pr.priority = parsed.priority || undefined;
-                    pr.relevantLinks = parsed.links;
-
-                    // AI can upgrade userNeed if it detects the user should pay attention
-                    if (parsed.userNeed) {
-                        pr.userNeed = parsed.userNeed;
+                    if (!instance) {
+                        this.enrichmentCache.set(key, { attempted: true });
+                        continue;
                     }
 
-                    enrichedAny = true;
+                    const diff = await instance.provider.diff.getDiff(pr.id);
+                    if (!diff || diff.length === 0) {
+                        this.enrichmentCache.set(key, { attempted: true });
+                        continue;
+                    }
+
+                    const response = await this.aiService!.summarizeDiff(diff);
+                    const parsed = this.parseSummarizeResponse(response);
+
+                    // Store in central enrichment cache
+                    const enrichment = {
+                        aiSummary: parsed.summary || undefined,
+                        priority: parsed.priority || undefined,
+                        relevantLinks: parsed.links,
+                        userNeed: parsed.userNeed || undefined,
+                        attempted: true,
+                    };
+                    this.enrichmentCache.set(key, enrichment);
+
+                    // Apply to current PR object
+                    if (enrichment.aiSummary) { pr.aiSummary = enrichment.aiSummary; }
+                    if (enrichment.priority) { pr.priority = enrichment.priority; }
+                    if (enrichment.relevantLinks) { pr.relevantLinks = enrichment.relevantLinks; }
+                    if (enrichment.userNeed) { pr.userNeed = enrichment.userNeed; }
+
+                    if (enrichment.aiSummary) {
+                        enrichedAny = true;
+                        logger.info(`enrichPrsWithAi: enriched PR ${pr.id}`);
+                    } else {
+                        logger.info(`enrichPrsWithAi: AI returned no summary for PR ${pr.id}, marking attempted`);
+                    }
                 } catch (error) {
                     logger.warn(`Failed to enrich PR ${pr.id} with AI info`, error);
+                    this.enrichmentCache.set(key, { attempted: true });
                 }
             }
 
-            // Only notify views if at least one PR was actually enriched
+            // Only notify views if at least one PR got a real summary
             if (enrichedAny) {
+                logger.info('enrichPrsWithAi: completed, firing onDidEnrich');
                 this._onDidEnrich.fire();
+            } else {
+                logger.info('enrichPrsWithAi: completed, no PRs got summaries');
             }
         } finally {
             this._enriching = false;
@@ -270,6 +325,7 @@ export class PullRequestService {
             if (this._enrichQueue) {
                 const queued = this._enrichQueue;
                 this._enrichQueue = undefined;
+                logger.info(`enrichPrsWithAi: processing queued batch of ${queued.length} PRs`);
                 this.enrichPrsWithAi(queued);
             }
         }
