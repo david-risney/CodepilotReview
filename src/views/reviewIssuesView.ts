@@ -48,9 +48,13 @@ export class ReviewIssuesViewProvider implements vscode.TreeDataProvider<ReviewI
         const statuses: Array<{ status: ReviewIssueStatus; label: string; icon: string }> = [
             { status: 'suggested', label: '💭 Suggested', icon: 'lightbulb' },
             { status: 'draft', label: '📝 Draft', icon: 'edit' },
-            { status: 'published', label: '📤 Published', icon: 'cloud-upload' },
-            { status: 'dismissed', label: '❌ Dismissed', icon: 'circle-slash' },
+            { status: 'published', label: '📤 Active', icon: 'comment-discussion' },
+            { status: 'pending', label: '⏳ Pending', icon: 'clock' },
             { status: 'resolved', label: '✅ Resolved', icon: 'check' },
+            { status: 'closed', label: '🔒 Closed', icon: 'lock' },
+            { status: 'wontFix', label: '🚫 Won\'t Fix', icon: 'circle-slash' },
+            { status: 'byDesign', label: '📐 By Design', icon: 'verified' },
+            { status: 'dismissed', label: '❌ Dismissed', icon: 'circle-slash' },
         ];
 
         for (const { status, label, icon } of statuses) {
@@ -175,9 +179,13 @@ export class ReviewIssueTreeItem extends vscode.TreeItem {
         switch (status) {
             case 'suggested': return new vscode.ThemeIcon('lightbulb');
             case 'draft': return new vscode.ThemeIcon('edit');
-            case 'published': return new vscode.ThemeIcon('cloud-upload');
-            case 'dismissed': return new vscode.ThemeIcon('circle-slash');
+            case 'published': return new vscode.ThemeIcon('comment-discussion');
+            case 'pending': return new vscode.ThemeIcon('clock');
             case 'resolved': return new vscode.ThemeIcon('check');
+            case 'closed': return new vscode.ThemeIcon('lock');
+            case 'wontFix': return new vscode.ThemeIcon('circle-slash');
+            case 'byDesign': return new vscode.ThemeIcon('verified');
+            case 'dismissed': return new vscode.ThemeIcon('circle-slash');
         }
     }
 }

@@ -118,7 +118,16 @@ export interface DiffPosition {
 
 // --- Review Comments & Issues ---
 
-export type ReviewIssueStatus = 'suggested' | 'draft' | 'published' | 'dismissed' | 'resolved';
+export type ReviewIssueStatus =
+    | 'suggested'   // AI/tool suggested, not yet accepted
+    | 'draft'       // User created/accepted, not yet published
+    | 'published'   // Published and active/open on provider
+    | 'pending'     // Published, awaiting response (ADO)
+    | 'resolved'    // Fixed/resolved
+    | 'closed'      // Closed (distinct from resolved)
+    | 'wontFix'     // Won't fix (ADO)
+    | 'byDesign'    // By design (ADO)
+    | 'dismissed';  // User rejected suggestion (internal)
 export type ReviewIssueSource = 'tool' | 'ai' | 'user' | 'provider';
 
 export interface ReviewIssue {
@@ -145,6 +154,8 @@ export interface ReviewIssue {
     providerCommentId?: string;
     /** If this is a reply, the ID of the parent ReviewIssue */
     parentIssueId?: string;
+    /** Raw provider-specific status value for round-tripping */
+    providerStatus?: string;
 }
 
 export type SuggestedFix =
@@ -239,6 +250,14 @@ export interface ProviderCapabilities {
     supportsReviewVotes: boolean;
     supportsLabels: boolean;
     requiresAuthentication: boolean;
+    /** Provider supports editing own published comments */
+    supportsCommentEdit: boolean;
+    /** Provider supports deleting own published comments */
+    supportsCommentDelete: boolean;
+    /** Provider supports resolving/unresolving comment threads */
+    supportsCommentResolve: boolean;
+    /** Provider-specific statuses available for comment threads */
+    commentStatuses: ReviewIssueStatus[];
 }
 
 // --- Multi-Provider Configuration ---

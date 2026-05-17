@@ -161,20 +161,35 @@ function mapAdoThreadStatus(status: number): ReviewIssueStatus {
     switch (status) {
         case 1: return 'published';
         case 2: return 'resolved';
-        case 3: return 'dismissed';
-        case 4: return 'resolved';
-        case 5: return 'dismissed';
-        case 6: return 'draft';
+        case 3: return 'wontFix';
+        case 4: return 'closed';
+        case 5: return 'byDesign';
+        case 6: return 'pending';
         default: return 'published';
+    }
+}
+
+function mapAdoThreadProviderStatus(status: number): string {
+    switch (status) {
+        case 1: return 'active';
+        case 2: return 'fixed';
+        case 3: return 'wontFix';
+        case 4: return 'closed';
+        case 5: return 'byDesign';
+        case 6: return 'pending';
+        default: return 'unknown';
     }
 }
 
 function reviewIssueStatusToAdoThreadStatus(status: ReviewIssueStatus): number {
     switch (status) {
         case 'resolved': return 2; // fixed
-        case 'dismissed': return 3; // wontFix
-        case 'draft': return 6; // pending
+        case 'wontFix': return 3;
+        case 'closed': return 4;
+        case 'byDesign': return 5;
+        case 'pending': return 6;
         case 'published': return 1; // active
+        case 'dismissed': return 3; // wontFix is closest
         default: return 1;
     }
 }
@@ -234,6 +249,10 @@ export class AzureDevOpsProvider implements ICodeReviewProvider {
         supportsReviewVotes: true,
         supportsLabels: true,
         requiresAuthentication: true,
+        supportsCommentEdit: true,
+        supportsCommentDelete: true,
+        supportsCommentResolve: true,
+        commentStatuses: ['published', 'pending', 'resolved', 'closed', 'wontFix', 'byDesign'],
     };
 
     readonly pullRequests: IPullRequestProvider;
@@ -617,6 +636,7 @@ class AdoCommentProvider implements ICommentProvider {
                 source: 'provider',
                 createdAt: new Date(firstComment.publishedDate ?? Date.now()),
                 providerCommentId: `${thread.id}:${firstComment.id}`,
+                providerStatus: mapAdoThreadProviderStatus(thread.status ?? 0),
             });
         }
 

@@ -188,8 +188,12 @@ export class ReviewCommentController {
             case 'suggested': return '💭';
             case 'draft': return '📝';
             case 'published': return '📤';
-            case 'dismissed': return '❌';
+            case 'pending': return '⏳';
             case 'resolved': return '✅';
+            case 'closed': return '🔒';
+            case 'wontFix': return '🚫';
+            case 'byDesign': return '📐';
+            case 'dismissed': return '❌';
         }
     }
 }

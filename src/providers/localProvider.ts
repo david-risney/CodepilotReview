@@ -27,6 +27,10 @@ export class LocalProvider implements ICodeReviewProvider {
         supportsReviewVotes: false,
         supportsLabels: false,
         requiresAuthentication: false,
+        supportsCommentEdit: true,
+        supportsCommentDelete: true,
+        supportsCommentResolve: true,
+        commentStatuses: ['suggested', 'draft', 'resolved', 'dismissed'],
     };
 
     readonly pullRequests: IPullRequestProvider;

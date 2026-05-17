@@ -255,6 +255,10 @@ export class ChromiumProvider implements ICodeReviewProvider {
         supportsReviewVotes: true,
         supportsLabels: true,
         requiresAuthentication: true,
+        supportsCommentEdit: false,   // Cannot edit published comments in Gerrit
+        supportsCommentDelete: false, // Cannot delete published comments (admin-only redaction)
+        supportsCommentResolve: true,
+        commentStatuses: ['published', 'resolved'],
     };
 
     readonly pullRequests: IPullRequestProvider;

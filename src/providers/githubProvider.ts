@@ -182,6 +182,22 @@ async function requireToken(): Promise<string> {
     return token;
 }
 
+/** Execute a GitHub GraphQL query/mutation */
+async function githubGraphQL<T>(query: string, variables: Record<string, unknown>, token: string): Promise<T> {
+    const resp = await githubRequest<any>(
+        '/graphql',
+        token,
+        { method: 'POST', body: { query, variables } },
+    );
+    if (resp.data.errors?.length) {
+        throw new ProviderError(
+            `GitHub GraphQL error: ${resp.data.errors[0].message}`,
+            'github',
+        );
+    }
+    return resp.data.data as T;
+}
+
 // ── Mapping helpers ────────────────────────────────────────────────────
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -328,6 +344,10 @@ export class GitHubProvider implements ICodeReviewProvider {
         supportsReviewVotes: true,
         supportsLabels: true,
         requiresAuthentication: true,
+        supportsCommentEdit: true,
+        supportsCommentDelete: true,
+        supportsCommentResolve: true,
+        commentStatuses: ['published', 'resolved'],
     };
 
     readonly pullRequests: IPullRequestProvider;
@@ -619,6 +639,9 @@ class GitHubDiffProvider implements IDiffProvider {
 
 // ── Comments ───────────────────────────────────────────────────────────
 
+/** Maps comment REST ID → thread GraphQL node ID for resolve/unresolve */
+const commentThreadNodeIds = new Map<string, string>();
+
 class GitHubCommentProvider implements ICommentProvider {
     constructor(private provider: GitHubProvider) {}
 
@@ -626,13 +649,92 @@ class GitHubCommentProvider implements ICommentProvider {
         const token = await requireToken();
         const { owner, repo, number } = this.provider.parsePrId(pullRequestId);
 
+        // Fetch comments via REST for full data
         const comments = await githubPaginatedGet<any>(
             `/repos/${owner}/${repo}/pulls/${number}/comments?per_page=100`,
             token,
         );
 
+        // Fetch thread resolution state via GraphQL
+        const threadResolution = await this.fetchThreadResolution(owner, repo, number, token);
+
         logger.info(`GitHub getComments: ${comments.length} comments on PR #${number}`);
-        return comments.map(mapComment);
+
+        return comments.map((c: any) => {
+            const issue = mapComment(c);
+            // Match comment to its thread resolution state via node_id
+            const nodeId = c.node_id;
+            if (nodeId && threadResolution.has(nodeId)) {
+                const threadInfo = threadResolution.get(nodeId)!;
+                if (threadInfo.isResolved) {
+                    issue.status = 'resolved';
+                }
+                // Store thread node ID for later resolve/unresolve
+                commentThreadNodeIds.set(String(c.id), threadInfo.threadNodeId);
+            }
+            return issue;
+        });
+    }
+
+    /** Fetch thread resolution state and map comment node IDs → thread node IDs */
+    private async fetchThreadResolution(
+        owner: string, repo: string, prNumber: string, token: string,
+    ): Promise<Map<string, { isResolved: boolean; threadNodeId: string }>> {
+        const map = new Map<string, { isResolved: boolean; threadNodeId: string }>();
+
+        try {
+            const query = `
+                query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+                    repository(owner: $owner, name: $repo) {
+                        pullRequest(number: $number) {
+                            reviewThreads(first: 100, after: $cursor) {
+                                nodes {
+                                    id
+                                    isResolved
+                                    comments(first: 1) {
+                                        nodes { id }
+                                    }
+                                }
+                                pageInfo { hasNextPage endCursor }
+                            }
+                        }
+                    }
+                }
+            `;
+
+            let cursor: string | null = null;
+            let hasNext = true;
+
+            while (hasNext) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const result: any = await githubGraphQL<any>(
+                    query,
+                    { owner, repo, number: parseInt(prNumber, 10), cursor },
+                    token,
+                );
+
+                const threads: any = result.repository?.pullRequest?.reviewThreads;
+                if (!threads) { break; }
+
+                for (const thread of threads.nodes) {
+                    const firstCommentNodeId = thread.comments?.nodes?.[0]?.id;
+                    if (firstCommentNodeId) {
+                        map.set(firstCommentNodeId, {
+                            isResolved: thread.isResolved,
+                            threadNodeId: thread.id,
+                        });
+                    }
+                }
+
+                hasNext = threads.pageInfo.hasNextPage;
+                cursor = threads.pageInfo.endCursor;
+            }
+        } catch (error) {
+            // GraphQL may fail (e.g. token lacks permissions); fall back gracefully
+            logger.warn('GitHub: failed to fetch thread resolution state via GraphQL', error);
+        }
+
+        return map;
     }
 
     async publishComment(pullRequestId: string, issue: ReviewIssue): Promise<ReviewIssue> {
@@ -762,50 +864,44 @@ class GitHubCommentProvider implements ICommentProvider {
         commentId: string,
         status: ReviewIssueStatus,
     ): Promise<void> {
-        // GitHub doesn't have a native comment status field.
-        // We emulate it by prepending a status tag to the comment body.
         const token = await requireToken();
-        const owner = this.provider.getOwner();
-        const repo = this.provider.getRepo();
 
-        let existing: any;
-        try {
-            const resp = await githubRequest<any>(
-                `/repos/${owner}/${repo}/pulls/comments/${commentId}`,
-                token,
-            );
-            existing = resp.data;
-        } catch {
-            const resp = await githubRequest<any>(
-                `/repos/${owner}/${repo}/issues/comments/${commentId}`,
-                token,
-            );
-            existing = resp.data;
+        // GitHub supports resolved/unresolved via GraphQL thread mutations
+        const threadNodeId = commentThreadNodeIds.get(commentId);
+
+        if (!threadNodeId) {
+            logger.warn(`GitHub updateCommentStatus: no thread node ID for comment ${commentId}, cannot resolve/unresolve`);
+            return;
         }
 
-        // Strip any existing status tag and prepend the new one
-        let body: string = existing.body ?? '';
-        body = body.replace(/^\[status:\s*\w+\]\s*/i, '');
-        if (status !== 'published') {
-            body = `[status: ${status}] ${body}`;
-        }
-
-        try {
-            await githubRequest<any>(
-                `/repos/${owner}/${repo}/pulls/comments/${commentId}`,
+        if (status === 'resolved') {
+            await githubGraphQL<any>(
+                `mutation($threadId: ID!) {
+                    resolveReviewThread(input: { threadId: $threadId }) {
+                        thread { id isResolved }
+                    }
+                }`,
+                { threadId: threadNodeId },
                 token,
-                { method: 'PATCH', body: { body } },
             );
-        } catch {
-            await githubRequest<any>(
-                `/repos/${owner}/${repo}/issues/comments/${commentId}`,
+        } else if (status === 'published') {
+            // Unresolve = set back to active/published
+            await githubGraphQL<any>(
+                `mutation($threadId: ID!) {
+                    unresolveReviewThread(input: { threadId: $threadId }) {
+                        thread { id isResolved }
+                    }
+                }`,
+                { threadId: threadNodeId },
                 token,
-                { method: 'PATCH', body: { body } },
             );
+        } else {
+            logger.warn(`GitHub updateCommentStatus: status '${status}' not natively supported, only resolved/published`);
+            return;
         }
 
         void pullRequestId;
-        logger.info(`GitHub updateCommentStatus: ${commentId} → ${status}`);
+        logger.info(`GitHub updateCommentStatus: ${commentId} → ${status} (thread ${threadNodeId})`);
     }
 }
 

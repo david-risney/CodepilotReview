@@ -112,12 +112,19 @@ suite('ReviewIssue Model', () => {
             { from: 'suggested', to: 'draft' },      // accept
             { from: 'draft', to: 'published' },       // publish
             { from: 'published', to: 'resolved' },    // resolve
+            { from: 'published', to: 'closed' },      // close (ADO)
+            { from: 'published', to: 'wontFix' },     // won't fix (ADO)
+            { from: 'published', to: 'byDesign' },    // by design (ADO)
+            { from: 'published', to: 'pending' },     // pending (ADO)
             { from: 'suggested', to: 'dismissed' },   // dismiss
             { from: 'draft', to: 'dismissed' },       // dismiss
         ];
 
         // All transitions should be valid status values
-        const validStatuses: ReviewIssueStatus[] = ['suggested', 'draft', 'published', 'dismissed', 'resolved'];
+        const validStatuses: ReviewIssueStatus[] = [
+            'suggested', 'draft', 'published', 'pending',
+            'resolved', 'closed', 'wontFix', 'byDesign', 'dismissed',
+        ];
         for (const t of transitions) {
             assert.ok(validStatuses.includes(t.from), `${t.from} is valid`);
             assert.ok(validStatuses.includes(t.to), `${t.to} is valid`);
