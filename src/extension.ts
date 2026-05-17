@@ -194,6 +194,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             prListView.refresh('manual refresh command');
         }),
 
+        vscode.commands.registerCommand('codepilotReview.openInBrowser', (node: any) => {
+            const url = node?.pr?.url;
+            if (url) {
+                vscode.env.openExternal(vscode.Uri.parse(url));
+            } else {
+                vscode.window.showWarningMessage('No URL available for this item');
+            }
+        }),
+
         vscode.commands.registerCommand('codepilotReview.selectProvider', async () => {
             const action = await vscode.window.showQuickPick(
                 [

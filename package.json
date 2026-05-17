@@ -232,6 +232,12 @@
         "title": "Create Review Issue",
         "category": "CodepilotReview",
         "icon": "$(add)"
+      },
+      {
+        "command": "codepilotReview.openInBrowser",
+        "title": "Open in Browser",
+        "category": "CodepilotReview",
+        "icon": "$(link-external)"
       }
     ],
     "viewsContainers": {
@@ -329,6 +335,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "codepilotReview.openInBrowser",
+          "when": "viewItem == pullRequest",
+          "group": "inline"
+        },
+        {
+          "command": "codepilotReview.openInBrowser",
+          "when": "viewItem == pullRequest",
+          "group": "1_pr"
+        },
         {
           "command": "codepilotReview.acceptIssue",
           "when": "viewItem =~ /reviewIssue:suggested/",
