@@ -2,6 +2,13 @@
 
 VSCode extension for using Copilot to help with manual code review. This extension doesn't automate code reviews — it enhances the human review process with AI-powered analysis, partitioning, and guided walkthroughs.
 
+## Getting Started
+
+1. Install the extension in VS Code
+2. Open the CodepilotReview panel from the activity bar
+3. Add a code review provider (GitHub, Azure DevOps, Chromium, or Local)
+4. Browse and review pull requests with AI assistance
+
 ## Features
 
 - **Multi-Provider Support**: Local git, Azure DevOps, GitHub, and Chromium (Gerrit)
