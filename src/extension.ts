@@ -626,11 +626,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 placeHolder: 'Full description of the issue...',
             });
 
-            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-            const filePath = workspaceFolder
-                ? vscode.workspace.asRelativePath(editor.document.uri, false)
-                : editor.document.fileName;
-            const line = editor.selection.active.line + 1;
+            // Extract file path: handle codepilot-diff:// URIs (diff views) and regular files
+            const uri = editor.document.uri;
+            let filePath: string;
+            if (uri.scheme === 'codepilot-diff') {
+                // URI path is /{authority}/{filePath} e.g. /review/src/foo.ts or /git/src/foo.ts
+                const pathParts = uri.path.split('/').slice(2); // skip empty + authority
+                filePath = pathParts.join('/');
+            } else {
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                filePath = workspaceFolder
+                    ? vscode.workspace.asRelativePath(uri, false)
+                    : editor.document.fileName;
+            }
+
+            const line = editor.selection.start.line + 1;
+            const endLine = editor.selection.end.line + 1;
 
             const issue: ReviewIssue = {
                 id: `user-${Date.now()}`,
@@ -644,6 +655,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
             sessionService.addIssue(issue);
 
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
             if (workspaceFolder) {
                 await commentController.showIssues(sessionService.getIssues(), workspaceFolder.uri);
             }

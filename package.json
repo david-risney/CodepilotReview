@@ -384,6 +384,13 @@
           "when": "viewItem == partitionSchemeCustom",
           "group": "inline"
         }
+      ],
+      "editor/context": [
+        {
+          "command": "codepilotReview.createIssue",
+          "when": "codepilotReview.hasActiveReview",
+          "group": "codepilotReview"
+        }
       ]
     },
     "configuration": {
