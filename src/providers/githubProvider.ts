@@ -352,11 +352,13 @@ export class GitHubProvider implements ICodeReviewProvider {
             this.repo = this.instanceConfig.repo || '';
         }
 
-        if (!this.owner || !this.repo) {
-            logger.warn('GitHub owner and repo must be configured');
+        if (!this.owner && !this.repo) {
+            logger.info('GitHub provider initialized in cross-repo search mode');
+        } else if (!this.owner || !this.repo) {
+            logger.warn('GitHub owner and repo must both be configured (or both empty for cross-repo mode)');
+        } else {
+            logger.info(`GitHub provider initialized: ${this.owner}/${this.repo}`);
         }
-
-        logger.info(`GitHub provider initialized: ${this.owner}/${this.repo}`);
     }
 
     dispose(): void {
@@ -366,6 +368,21 @@ export class GitHubProvider implements ICodeReviewProvider {
     getOwner(): string { return this.owner; }
     getRepo(): string { return this.repo; }
     getInstanceId(): string { return this.instanceConfig?.id || this.name; }
+
+    /** True when owner/repo are empty — uses search API for cross-repo queries */
+    isCrossRepoMode(): boolean { return !this.owner && !this.repo; }
+
+    /**
+     * Parse a PR id that may be a compound "owner/repo#number" (cross-repo mode)
+     * or a plain number string (single-repo mode).
+     */
+    parsePrId(prId: string): { owner: string; repo: string; number: string } {
+        const match = prId.match(/^(.+?)\/(.+?)#(\d+)$/);
+        if (match) {
+            return { owner: match[1], repo: match[2], number: match[3] };
+        }
+        return { owner: this.owner, repo: this.repo, number: prId };
+    }
 }
 
 // ── Pull Requests ──────────────────────────────────────────────────────
@@ -378,6 +395,12 @@ class GitHubPullRequestProvider implements IPullRequestProvider {
         const owner = this.provider.getOwner();
         const repo = this.provider.getRepo();
 
+        // Cross-repo mode: use GitHub Search API
+        if (this.provider.isCrossRepoMode()) {
+            return this.searchPullRequests(token, filter);
+        }
+
+        // Single-repo mode: use per-repo pulls endpoint
         // Map filter status to GitHub API state parameter
         let state = 'open';
         if (filter?.status) {
@@ -427,17 +450,98 @@ class GitHubPullRequestProvider implements IPullRequestProvider {
         return prs.map((pr: any) => mapPullRequest(pr, this.provider.name, this.provider.getInstanceId()));
     }
 
+    /**
+     * Cross-repo search using GitHub Search API.
+     * Returns PRs from any repo matching the search criteria.
+     */
+    private async searchPullRequests(token: string, filter?: PullRequestFilter): Promise<PullRequest[]> {
+        // Build search query
+        const queryParts: string[] = ['is:pr'];
+
+        // Status
+        if (filter?.status) {
+            if (filter.status.includes('merged')) {
+                queryParts.push('is:merged');
+            } else if (filter.status.includes('closed')) {
+                queryParts.push('is:closed');
+            } else if (filter.status.includes('open') || filter.status.length === 0) {
+                queryParts.push('is:open');
+            }
+        } else {
+            queryParts.push('is:open');
+        }
+
+        // Author
+        if (filter?.author) {
+            queryParts.push(`author:${filter.author}`);
+        }
+
+        // Reviewer (map to review-requested or reviewed-by)
+        if (filter?.reviewer) {
+            queryParts.push(`review-requested:${filter.reviewer}`);
+        }
+
+        // Labels
+        if (filter?.labels) {
+            for (const label of filter.labels) {
+                queryParts.push(`label:"${label}"`);
+            }
+        }
+
+        // Text search
+        if (filter?.searchText) {
+            queryParts.push(filter.searchText);
+        }
+
+        // Default: show PRs involving the authenticated user
+        if (!filter?.author && !filter?.reviewer && !filter?.searchText) {
+            queryParts.push('involves:@me');
+        }
+
+        const q = encodeURIComponent(queryParts.join(' '));
+        const resp = await githubRequest<any>(
+            `/search/issues?q=${q}&per_page=100&sort=updated&order=desc`,
+            token,
+        );
+
+        const items = resp.data?.items ?? [];
+        logger.info(`GitHub search PRs: found ${items.length} PRs (query: ${queryParts.join(' ')})`);
+
+        // Map search results to PullRequest — extract owner/repo from repository_url
+        return items.map((item: any) => {
+            const repoUrl: string = item.repository_url ?? '';
+            // repository_url is like "https://api.github.com/repos/owner/repo"
+            const repoParts = repoUrl.split('/');
+            const itemRepo = repoParts[repoParts.length - 1] ?? '';
+            const itemOwner = repoParts[repoParts.length - 2] ?? '';
+
+            const pr = mapPullRequest(item, this.provider.name, this.provider.getInstanceId());
+            // Use compound ID so diff/comments can resolve the correct repo
+            pr.id = `${itemOwner}/${itemRepo}#${item.number}`;
+            // Fix branches — search results use pull_request object
+            if (item.pull_request) {
+                pr.url = item.pull_request.html_url ?? pr.url;
+            }
+            // Add repo context to description
+            pr.description = `[${itemOwner}/${itemRepo}] ${pr.description}`;
+            return pr;
+        });
+    }
+
     async getPullRequest(id: string): Promise<PullRequest | undefined> {
         const token = await requireToken();
-        const owner = this.provider.getOwner();
-        const repo = this.provider.getRepo();
+        const { owner, repo, number } = this.provider.parsePrId(id);
 
         try {
             const resp = await githubRequest<any>(
-                `/repos/${owner}/${repo}/pulls/${id}`,
+                `/repos/${owner}/${repo}/pulls/${number}`,
                 token,
             );
-            return mapPullRequest(resp.data, this.provider.name, this.provider.getInstanceId());
+            const pr = mapPullRequest(resp.data, this.provider.name, this.provider.getInstanceId());
+            if (this.provider.isCrossRepoMode()) {
+                pr.id = `${owner}/${repo}#${number}`;
+            }
+            return pr;
         } catch (err) {
             if (err instanceof ProviderError && err.message.includes('not found')) {
                 return undefined;
@@ -454,23 +558,22 @@ class GitHubDiffProvider implements IDiffProvider {
 
     async getDiff(pullRequestId: string): Promise<DiffFile[]> {
         const token = await requireToken();
-        const owner = this.provider.getOwner();
-        const repo = this.provider.getRepo();
+        const { owner, repo, number } = this.provider.parsePrId(pullRequestId);
 
         // Fetch PR metadata to get base/head SHAs
         const prResp = await githubRequest<any>(
-            `/repos/${owner}/${repo}/pulls/${pullRequestId}`,
+            `/repos/${owner}/${repo}/pulls/${number}`,
             token,
         );
         const baseSha: string = prResp.data.base?.sha ?? '';
         const headSha: string = prResp.data.head?.sha ?? '';
 
         const files = await githubPaginatedGet<any>(
-            `/repos/${owner}/${repo}/pulls/${pullRequestId}/files?per_page=100`,
+            `/repos/${owner}/${repo}/pulls/${number}/files?per_page=100`,
             token,
         );
 
-        logger.info(`GitHub getDiff: ${files.length} files in PR #${pullRequestId}`);
+        logger.info(`GitHub getDiff: ${files.length} files in PR #${number}`);
 
         return files.map((f: any): DiffFile => ({
             oldPath: f.status === 'added' ? undefined : (f.previous_filename ?? f.filename),
@@ -488,9 +591,20 @@ class GitHubDiffProvider implements IDiffProvider {
         const owner = this.provider.getOwner();
         const repo = this.provider.getRepo();
 
+        // In cross-repo mode, the revision may include repo info encoded as "owner/repo:sha"
+        let resolvedOwner = owner;
+        let resolvedRepo = repo;
+        let resolvedRevision = revision;
+        const repoMatch = revision.match(/^(.+?)\/(.+?):(.+)$/);
+        if (repoMatch) {
+            resolvedOwner = repoMatch[1];
+            resolvedRepo = repoMatch[2];
+            resolvedRevision = repoMatch[3];
+        }
+
         const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
         const resp = await githubRequest<any>(
-            `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(revision)}`,
+            `/repos/${resolvedOwner}/${resolvedRepo}/contents/${encodedPath}?ref=${encodeURIComponent(resolvedRevision)}`,
             token,
         );
 
@@ -509,29 +623,27 @@ class GitHubCommentProvider implements ICommentProvider {
 
     async getComments(pullRequestId: string): Promise<ReviewIssue[]> {
         const token = await requireToken();
-        const owner = this.provider.getOwner();
-        const repo = this.provider.getRepo();
+        const { owner, repo, number } = this.provider.parsePrId(pullRequestId);
 
         const comments = await githubPaginatedGet<any>(
-            `/repos/${owner}/${repo}/pulls/${pullRequestId}/comments?per_page=100`,
+            `/repos/${owner}/${repo}/pulls/${number}/comments?per_page=100`,
             token,
         );
 
-        logger.info(`GitHub getComments: ${comments.length} comments on PR #${pullRequestId}`);
+        logger.info(`GitHub getComments: ${comments.length} comments on PR #${number}`);
         return comments.map(mapComment);
     }
 
     async publishComment(pullRequestId: string, issue: ReviewIssue): Promise<ReviewIssue> {
         const token = await requireToken();
-        const owner = this.provider.getOwner();
-        const repo = this.provider.getRepo();
+        const { owner, repo, number } = this.provider.parsePrId(pullRequestId);
 
         const body = issue.details || issue.summary;
 
         if (issue.position.filePath && issue.position.line > 0) {
             // File-level review comment — requires the latest commit on the PR head
             const prResp = await githubRequest<any>(
-                `/repos/${owner}/${repo}/pulls/${pullRequestId}`,
+                `/repos/${owner}/${repo}/pulls/${number}`,
                 token,
             );
             const commitId: string = prResp.data.head?.sha ?? '';
@@ -545,7 +657,7 @@ class GitHubCommentProvider implements ICommentProvider {
             };
 
             const resp = await githubRequest<any>(
-                `/repos/${owner}/${repo}/pulls/${pullRequestId}/comments`,
+                `/repos/${owner}/${repo}/pulls/${number}/comments`,
                 token,
                 { method: 'POST', body: payload },
             );
@@ -559,7 +671,7 @@ class GitHubCommentProvider implements ICommentProvider {
         } else {
             // PR-level (issue) comment
             const resp = await githubRequest<any>(
-                `/repos/${owner}/${repo}/issues/${pullRequestId}/comments`,
+                `/repos/${owner}/${repo}/issues/${number}/comments`,
                 token,
                 { method: 'POST', body: { body } },
             );

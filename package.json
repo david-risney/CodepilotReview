@@ -429,7 +429,7 @@
           "type": "array",
           "default": [],
           "description": "Code review provider instances. Each entry configures one provider with its connection settings and optional views.",
-          "markdownDescription": "Code review provider instances. Each entry configures one provider with its connection settings and optional views (saved searches).\n\nExample:\n```json\n[\n  {\n    \"id\": \"ado-edge\",\n    \"label\": \"Edge PRs\",\n    \"type\": \"azureDevOps\",\n    \"organization\": \"microsoft\",\n    \"project\": \"Edge\",\n    \"views\": [\n      { \"id\": \"my-prs\", \"label\": \"My PRs\", \"query\": { \"type\": \"azureDevOps\", \"creatorId\": \"me\" } },\n      { \"id\": \"needs-review\", \"label\": \"Needs Review\", \"query\": { \"type\": \"azureDevOps\", \"reviewerId\": \"me\" } }\n    ]\n  },\n  {\n    \"id\": \"github-vscode\",\n    \"label\": \"VS Code GitHub\",\n    \"type\": \"github\",\n    \"owner\": \"microsoft\",\n    \"repo\": \"vscode\"\n  }\n]\n```",
+          "markdownDescription": "Code review provider instances. Each entry configures one provider with its connection settings and optional views (saved searches).\n\nExample:\n```json\n[\n  {\n    \"id\": \"ado-edge\",\n    \"label\": \"Edge PRs\",\n    \"type\": \"azureDevOps\",\n    \"organization\": \"microsoft\",\n    \"project\": \"Edge\",\n    \"views\": [\n      { \"id\": \"my-prs\", \"label\": \"My PRs\", \"query\": { \"type\": \"azureDevOps\", \"creatorId\": \"me\" } },\n      { \"id\": \"needs-review\", \"label\": \"Needs Review\", \"query\": { \"type\": \"azureDevOps\", \"reviewerId\": \"me\" } }\n    ]\n  },\n  {\n    \"id\": \"github-vscode\",\n    \"label\": \"VS Code GitHub\",\n    \"type\": \"github\",\n    \"owner\": \"microsoft\",\n    \"repo\": \"vscode\"\n  },\n  {\n    \"id\": \"github-all\",\n    \"label\": \"All My PRs\",\n    \"type\": \"github\",\n    \"owner\": \"\",\n    \"repo\": \"\"\n  }\n]\n```\n\nLeave `owner` and `repo` empty for GitHub cross-repo mode (shows all PRs involving you).",
           "items": {
             "type": "object",
             "required": ["id", "label", "type"],
@@ -461,11 +461,11 @@
               },
               "owner": {
                 "type": "string",
-                "description": "(GitHub) Repository owner (e.g. 'microsoft')"
+                "description": "(GitHub) Repository owner (e.g. 'microsoft'). Leave empty with repo for cross-repo search."
               },
               "repo": {
                 "type": "string",
-                "description": "(GitHub) Repository name (e.g. 'vscode')"
+                "description": "(GitHub) Repository name (e.g. 'vscode'). Leave empty with owner for cross-repo search."
               },
               "host": {
                 "type": "string",
