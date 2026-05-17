@@ -17,6 +17,7 @@ CodepilotReview supports multiple code review providers through a pluggable inte
 ### ICommentProvider
 - `getComments(pullRequestId)` - List existing comments
 - `publishComment(pullRequestId, issue)` - Publish a draft comment
+- `replyToComment?(pullRequestId, parentProviderCommentId, body)` - Reply to a published comment (optional)
 - `updateComment(pullRequestId, issue)` - Update a published comment
 - `deleteComment(pullRequestId, commentId)` - Delete a comment
 - `updateCommentStatus(pullRequestId, commentId, status)` - Change comment status
@@ -35,32 +36,63 @@ CodepilotReview supports multiple code review providers through a pluggable inte
 - Stores draft comments in VSCode workspace storage
 - No authentication required
 - Cannot publish to external service
+- Full edit/delete of local comments
 
 ### Azure DevOps
 - Connects to ADO REST API
 - Supports threads, draft comments, review votes, labels
 - Requires PAT or Azure Identity authentication
-- Supports advanced filtering (since ADO doesn't natively support complex queries)
+- Thread statuses: Active, Pending, Fixed (Resolved), Closed, Won't Fix, By Design
+- Status is on the thread, not individual comments
+- Edit/delete own comments; editing others requires elevated permissions
+- Delete is a soft delete (`isDeleted` flag)
 
 ### GitHub
-- Connects to GitHub API (Octokit)
+- Connects to GitHub REST + GraphQL APIs
 - Supports threads, suggested changes, labels, draft reviews
 - Uses VSCode GitHub authentication session
-- Full comment lifecycle support
+- Thread resolution via GraphQL (`resolveReviewThread`/`unresolveReviewThread`)
+- REST API has no thread resolution support
+- Edit/delete own comments via REST
+- Cross-repo mode: leave `owner` and `repo` empty to search all PRs involving you
 
 ### Chromium (Gerrit)
 - Connects to Gerrit REST API
 - Uses Gerrit "changes" mapped to PR abstraction
 - Supports patchsets, inline comments, review labels
 - Requires Gerrit authentication (HTTP credentials)
+- Thread resolution via `unresolved` boolean (last comment's value determines thread state)
+- **Cannot edit or delete published comments** (immutable once published)
+- Drafts have full CRUD; published via `Set Review` endpoint
+- Admin-only "deletion" is actually redaction (replaces body text)
 
 ## Provider Capabilities
 
 Each provider declares its capabilities via `ProviderCapabilities`:
-- `supportsDraftComments` - Can hold comments before publishing
-- `supportsPublishing` - Can push comments to external service
-- `supportsThreads` - Supports threaded conversations
-- `supportsSuggestedFixes` - Can attach code suggestions
-- `supportsReviewVotes` - Supports approve/reject votes
-- `supportsLabels` - Supports PR labels/tags
-- `requiresAuthentication` - Needs auth to function
+
+| Capability | Local | GitHub | ADO | Chromium |
+|-----------|-------|--------|-----|----------|
+| `supportsDraftComments` | ✅ | ✅ | ✅ | ✅ |
+| `supportsPublishing` | ❌ | ✅ | ✅ | ✅ |
+| `supportsThreads` | ❌ | ✅ | ✅ | ✅ |
+| `supportsSuggestedFixes` | ✅ | ✅ | ❌ | ❌ |
+| `supportsReviewVotes` | ❌ | ✅ | ✅ | ✅ |
+| `supportsLabels` | ❌ | ✅ | ✅ | ✅ |
+| `requiresAuthentication` | ❌ | ✅ | ✅ | ✅ |
+| `supportsCommentEdit` | ✅ | ✅ | ✅ | ❌ |
+| `supportsCommentDelete` | ✅ | ✅ | ✅ | ❌ |
+| `supportsCommentResolve` | ✅ | ✅ | ✅ | ✅ |
+
+### Comment Statuses by Provider
+
+| Status | Local | GitHub | ADO | Chromium |
+|--------|-------|--------|-----|----------|
+| `suggested` | ✅ | — | — | — |
+| `draft` | ✅ | — | — | — |
+| `published` (active) | — | ✅ | ✅ | ✅ |
+| `pending` | — | — | ✅ | — |
+| `resolved` | ✅ | ✅ | ✅ | ✅ |
+| `closed` | — | — | ✅ | — |
+| `wontFix` | — | — | ✅ | — |
+| `byDesign` | — | — | ✅ | — |
+| `dismissed` | ✅ | — | — | — |
