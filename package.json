@@ -167,6 +167,17 @@
         "icon": "$(debug-stop)"
       },
       {
+        "command": "codepilotReview.goToTourStep",
+        "title": "Go to Tour Step",
+        "category": "CodepilotReview"
+      },
+      {
+        "command": "codepilotReview.showTourDetails",
+        "title": "Show Tour Details",
+        "category": "CodepilotReview",
+        "icon": "$(book)"
+      },
+      {
         "command": "codepilotReview.suggestReviewers",
         "title": "Suggest Reviewers",
         "category": "CodepilotReview"
@@ -241,6 +252,12 @@
           "id": "codepilotReview.partitions",
           "name": "Partitions",
           "when": "codepilotReview.hasActiveReview"
+        },
+        {
+          "id": "codepilotReview.tourDetails",
+          "type": "webview",
+          "name": "Code Tour",
+          "when": "codepilotReview.hasActiveTour"
         }
       ]
     },

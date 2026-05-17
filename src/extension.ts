@@ -10,6 +10,8 @@ import { ReviewerSuggestionService } from './core/reviewerSuggestionService';
 import { PrListViewProvider, ProviderTreeNode, ViewTreeNode } from './views/prListView';
 import { ReviewIssuesViewProvider } from './views/reviewIssuesView';
 import { PartitionViewProvider, SchemeTreeNode } from './views/partitionView';
+import { CodeTourViewProvider } from './views/codeTourView';
+import { CodeTourCodeLensProvider } from './views/codeTourCodeLens';
 import { ChatPanel } from './views/chatPanel';
 import { DiffContentProvider, openDiffView } from './views/diffContentProvider';
 import { ReviewCommentController } from './comments/commentController';
@@ -88,6 +90,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         partitionTreeView.description = active ? active.label : undefined;
     });
 
+    // Initialize Code Tour view and CodeLens
+    const tourViewProvider = new CodeTourViewProvider(context.extensionUri, tourService);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(CodeTourViewProvider.viewType, tourViewProvider)
+    );
+
+    const tourCodeLensProvider = new CodeTourCodeLensProvider(tourService);
+    context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider({ scheme: 'file' }, tourCodeLensProvider)
+    );
+
     // Initialize comment controller
     const commentController = new ReviewCommentController(sessionService);
     context.subscriptions.push({ dispose: () => commentController.dispose() });
@@ -139,6 +152,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Clear review state — selected PR may no longer be valid
         sessionService.clearReview();
         partitionService.clear();
+        tourService.stopTour();
         vscode.commands.executeCommand('setContext', 'codepilotReview.hasActiveReview', false);
     };
     providerManager.onDidChangeProviders(syncProviders);
@@ -894,7 +908,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         vscode.commands.registerCommand('codepilotReview.stopTour', () => {
             tourService.stopTour();
-            vscode.window.showInformationMessage('Code tour stopped');
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.goToTourStep', (index: number) => {
+            tourService.goToStep(index);
+        }),
+
+        vscode.commands.registerCommand('codepilotReview.showTourDetails', () => {
+            // Focus the tour details webview in the sidebar
+            vscode.commands.executeCommand('codepilotReview.tourDetails.focus');
         }),
 
         // --- Reviewer Commands ---
