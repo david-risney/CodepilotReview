@@ -44,6 +44,7 @@ export class ReviewToolManager {
 
         const allIssues: ReviewIssue[] = [];
         const totalFiles = input.diff.length;
+        let completedCount = 0;
 
         await vscode.window.withProgress(
             {
@@ -52,47 +53,52 @@ export class ReviewToolManager {
                 cancellable: true,
             },
             async (progress, token) => {
-                for (let i = 0; i < toolsToRun.length; i++) {
-                    if (token.isCancellationRequested) {
-                        break;
-                    }
+                progress.report({
+                    message: `Running ${toolsToRun.length} tool(s) concurrently on ${totalFiles} file(s)...`,
+                });
 
-                    const tool = toolsToRun[i];
-                    const toolLabel = `(${i + 1}/${toolsToRun.length}) ${tool.name}`;
-                    progress.report({
-                        message: `${toolLabel}: analyzing ${totalFiles} file(s)...`,
-                        increment: 0,
-                    });
+                const promises = toolsToRun.map(async (tool, i) => {
+                    if (token.isCancellationRequested) { return []; }
+
+                    const toolLabel = `${tool.name}`;
+                    const toolProgress = this.createToolProgressReporter(progress, toolLabel, totalFiles);
 
                     try {
                         const context: ReviewToolContext = {
                             cancellationToken: token,
                             progress,
                             workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
+                            onPhase: (phase: string) => toolProgress.reportPhase(phase),
                         };
 
-                        // Report phase changes within the tool via progress
-                        const toolProgress = this.createToolProgressReporter(progress, toolLabel, totalFiles);
+                        const issues = await tool.run(input, context);
+                        completedCount++;
 
-                        const issues = await this.runToolWithProgress(tool, input, context, toolProgress);
-                        allIssues.push(...issues);
-
+                        const increment = 100 / toolsToRun.length;
                         progress.report({
-                            message: `${toolLabel}: done — ${issues.length} issue(s) found. Total: ${allIssues.length}`,
-                            increment: (100 / toolsToRun.length),
+                            message: `${toolLabel}: ${issues.length} issue(s). (${completedCount}/${toolsToRun.length} tools done)`,
+                            increment,
                         });
 
                         logger.info(`Tool ${tool.name} found ${issues.length} issues`);
+                        return issues;
                     } catch (error) {
+                        completedCount++;
                         logger.error(`Tool ${tool.name} failed`, error);
                         progress.report({
-                            message: `${toolLabel}: failed — ${error}`,
-                            increment: (100 / toolsToRun.length),
+                            message: `${toolLabel}: failed. (${completedCount}/${toolsToRun.length} tools done)`,
+                            increment: 100 / toolsToRun.length,
                         });
                         vscode.window.showWarningMessage(
                             `Review tool "${tool.name}" failed: ${error}`
                         );
+                        return [];
                     }
+                });
+
+                const results = await Promise.all(promises);
+                for (const issues of results) {
+                    allIssues.push(...issues);
                 }
 
                 if (allIssues.length > 0) {
@@ -122,21 +128,6 @@ export class ReviewToolManager {
                 });
             },
         };
-    }
-
-    /** Run a single tool, reporting AI pass phases */
-    private async runToolWithProgress(
-        tool: IReviewTool,
-        input: ReviewToolInput,
-        context: ReviewToolContext,
-        toolProgress: { reportPhase: (phase: string) => void },
-    ): Promise<ReviewIssue[]> {
-        const phaseContext: ReviewToolContext = {
-            ...context,
-            onPhase: (phase: string) => toolProgress.reportPhase(phase),
-        };
-
-        return tool.run(input, phaseContext);
     }
 
     private registerBuiltInTools(): void {
