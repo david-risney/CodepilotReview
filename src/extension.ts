@@ -931,10 +931,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (diff.length === 0) { vscode.window.showWarningMessage('No diff available'); return; }
 
             try {
-                const tour = await tourService.generateTour(prId, diff);
-                await tourService.startTour(tour);
-                // Focus the tour details pane so it's visible and prominent
-                vscode.commands.executeCommand('codepilotReview.tourDetails.focus');
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: 'Generating code tour...',
+                        cancellable: false,
+                    },
+                    async () => {
+                        const tour = await tourService.generateTour(prId, diff);
+                        await tourService.startTour(tour);
+                        vscode.commands.executeCommand('codepilotReview.tourDetails.focus');
+                    }
+                );
             } catch (error) {
                 showError(error);
             }
