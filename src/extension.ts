@@ -203,6 +203,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
 
+        vscode.commands.registerCommand('codepilotReview.replyToIssue', (reply: vscode.CommentReply) => {
+            const thread = reply.thread;
+            const text = reply.text?.trim();
+            if (!text) { return; }
+
+            const newComment: vscode.Comment = {
+                body: new vscode.MarkdownString(text),
+                author: { name: '👤 You' },
+                mode: vscode.CommentMode.Preview,
+            };
+
+            thread.comments = [...thread.comments, newComment];
+        }),
+
         vscode.commands.registerCommand('codepilotReview.selectProvider', async () => {
             const action = await vscode.window.showQuickPick(
                 [

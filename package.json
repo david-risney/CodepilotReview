@@ -238,6 +238,12 @@
         "title": "Open in Browser",
         "category": "CodepilotReview",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "codepilotReview.replyToIssue",
+        "title": "Reply",
+        "category": "CodepilotReview",
+        "icon": "$(reply)"
       }
     ],
     "viewsContainers": {
@@ -406,6 +412,13 @@
           "command": "codepilotReview.createIssue",
           "when": "codepilotReview.hasActiveReview",
           "group": "codepilotReview"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "codepilotReview.replyToIssue",
+          "group": "inline",
+          "when": "commentController == codepilotReview"
         }
       ]
     },
