@@ -893,6 +893,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             try {
                 const tour = await tourService.generateTour(prId, diff);
                 await tourService.startTour(tour);
+                // Focus the tour details pane so it's visible and prominent
+                vscode.commands.executeCommand('codepilotReview.tourDetails.focus');
             } catch (error) {
                 showError(error);
             }

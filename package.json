@@ -246,12 +246,12 @@
         {
           "id": "codepilotReview.reviewIssues",
           "name": "Review Issues",
-          "when": "codepilotReview.hasActiveReview"
+          "when": "codepilotReview.hasActiveReview && !codepilotReview.hasActiveTour"
         },
         {
           "id": "codepilotReview.partitions",
           "name": "Partitions",
-          "when": "codepilotReview.hasActiveReview"
+          "when": "codepilotReview.hasActiveReview && !codepilotReview.hasActiveTour"
         },
         {
           "id": "codepilotReview.tourDetails",
