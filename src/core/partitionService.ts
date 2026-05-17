@@ -15,7 +15,7 @@ export class PartitionService {
     private schemes: PartitionScheme[] = [];
     private currentPrId: string | undefined;
     private currentDiff: DiffFile[] = [];
-    private _activeSchemeId: string = 'default';
+    private _activeSchemeId: string = 'all';
 
     constructor(
         private aiService: IAiService,
@@ -48,20 +48,20 @@ export class PartitionService {
         this.schemes = [];
         this.currentPrId = undefined;
         this.currentDiff = [];
-        this._activeSchemeId = 'default';
+        this._activeSchemeId = 'all';
         this._onDidChangePartitions.fire();
     }
 
-    /** Set up schemes for a new PR review. Creates default + dependencies schemes. */
-    async initForReview(prId: string, diff: DiffFile[]): Promise<void> {
+    /** Set up schemes for a new PR review. Creates all + dependencies schemes. */
+    async initForReview(prId: string, diff: DiffFile[], isLocal: boolean = false): Promise<void> {
         this.currentPrId = prId;
         this.currentDiff = diff;
 
-        // Build default scheme immediately (no AI needed)
-        const defaultScheme: PartitionScheme = {
-            id: 'default',
-            label: 'Default',
-            type: 'default',
+        // Build 'all' scheme immediately (no AI needed)
+        const allScheme: PartitionScheme = {
+            id: 'all',
+            label: 'All',
+            type: 'all',
             partitions: [this.createDefaultPartition(diff)],
             isLoaded: true,
         };
@@ -78,7 +78,9 @@ export class PartitionService {
         // Restore any saved custom schemes
         const savedSchemes = this.store.loadCustomSchemes(prId);
 
-        this.schemes = [defaultScheme, depsScheme, ...savedSchemes];
+        this.schemes = [allScheme, depsScheme, ...savedSchemes];
+        // Local providers default to 'all', remote to 'dependencies'
+        this._activeSchemeId = isLocal ? 'all' : 'dependencies';
         this._onDidChangePartitions.fire();
 
         // Auto-generate dependencies in background
@@ -177,7 +179,7 @@ export class PartitionService {
         scheme.isLoaded = false;
         this._onDidChangePartitions.fire();
 
-        if (scheme.type === 'default') {
+        if (scheme.type === 'all') {
             scheme.partitions = [this.createDefaultPartition(this.currentDiff)];
             scheme.isLoaded = true;
         } else if (scheme.type === 'dependencies') {

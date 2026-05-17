@@ -88,7 +88,7 @@ export class SchemeTreeNode extends vscode.TreeItem {
             : 'loading...';
 
         switch (scheme.type) {
-            case 'default':
+            case 'all':
                 this.iconPath = new vscode.ThemeIcon('list-flat');
                 break;
             case 'dependencies':

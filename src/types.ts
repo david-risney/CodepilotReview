@@ -175,7 +175,7 @@ export type PartitionType = 'dependency' | 'ownership' | 'custom';
 export interface PartitionScheme {
     id: string;
     label: string;
-    type: 'default' | 'dependencies' | 'custom';
+    type: 'all' | 'dependencies' | 'custom';
     /** User-defined Copilot prompt (only for 'custom' type) */
     prompt?: string;
     /** Generated partitions (populated after running the scheme) */

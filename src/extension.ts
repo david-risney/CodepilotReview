@@ -183,7 +183,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 // Initialize partition schemes for this PR
                 const diff = sessionService.getDiff();
                 if (diff.length > 0) {
-                    await partitionService.initForReview(pr.id, diff);
+                    const providerInstance = prService.getProviderById(pr.providerId);
+                    const isLocal = providerInstance?.type === 'local';
+                    await partitionService.initForReview(pr.id, diff, isLocal);
                 }
             } catch (error) {
                 showError(error);
