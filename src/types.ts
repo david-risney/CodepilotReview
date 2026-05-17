@@ -143,6 +143,8 @@ export interface ReviewIssue {
     createdAt: Date;
     /** Provider-specific comment ID (set after publishing) */
     providerCommentId?: string;
+    /** If this is a reply, the ID of the parent ReviewIssue */
+    parentIssueId?: string;
 }
 
 export type SuggestedFix =

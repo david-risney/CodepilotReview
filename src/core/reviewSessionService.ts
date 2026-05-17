@@ -126,8 +126,37 @@ export class ReviewSessionService {
         // If publishing, push to provider
         if (status === 'published' && oldStatus === 'draft' && this.provider?.comments && this.currentPrId) {
             try {
-                const updated = await this.provider.comments.publishComment(this.currentPrId, issue);
-                this.issues.set(issueId, updated);
+                if (issue.parentIssueId) {
+                    // This is a reply — find the parent's providerCommentId
+                    const parent = this.issues.get(issue.parentIssueId);
+                    const parentProviderCommentId = parent?.providerCommentId;
+
+                    if (!parentProviderCommentId) {
+                        logger.error(`Cannot publish reply ${issueId}: parent ${issue.parentIssueId} has no providerCommentId`);
+                        issue.status = oldStatus;
+                        return;
+                    }
+
+                    if (this.provider.comments.replyToComment) {
+                        const updated = await this.provider.comments.replyToComment(
+                            this.currentPrId,
+                            parentProviderCommentId,
+                            issue.details || issue.summary,
+                        );
+                        // Preserve local ID, update provider fields
+                        issue.providerCommentId = updated.providerCommentId;
+                        issue.status = 'published';
+                    } else {
+                        logger.error(`Provider does not support replyToComment`);
+                        issue.status = oldStatus;
+                        return;
+                    }
+                } else {
+                    const updated = await this.provider.comments.publishComment(this.currentPrId, issue);
+                    // Preserve local ID, update provider fields
+                    issue.providerCommentId = updated.providerCommentId;
+                    issue.status = 'published';
+                }
             } catch (error) {
                 logger.error(`Failed to publish issue ${issueId}`, error);
                 issue.status = oldStatus;
@@ -149,14 +178,26 @@ export class ReviewSessionService {
     /** Publish all draft issues */
     async publishAllDrafts(): Promise<number> {
         const drafts = this.getIssuesByStatus('draft');
+        // Publish root issues first, then replies (replies need parent's providerCommentId)
+        const roots = drafts.filter(d => !d.parentIssueId);
+        const replies = drafts.filter(d => d.parentIssueId);
         let published = 0;
 
-        for (const draft of drafts) {
+        for (const draft of roots) {
             try {
                 await this.updateIssueStatus(draft.id, 'published');
-                published++;
+                if (draft.status === 'published') { published++; }
             } catch (error) {
                 logger.error(`Failed to publish draft ${draft.id}`, error);
+            }
+        }
+
+        for (const reply of replies) {
+            try {
+                await this.updateIssueStatus(reply.id, 'published');
+                if (reply.status === 'published') { published++; }
+            } catch (error) {
+                logger.error(`Failed to publish reply ${reply.id}`, error);
             }
         }
 

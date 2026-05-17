@@ -10,6 +10,7 @@ import { logger } from '../logging/logger';
 export class ReviewCommentController {
     private commentController: vscode.CommentController;
     private threads: Map<string, vscode.CommentThread> = new Map();
+    private threadToIssueId: WeakMap<vscode.CommentThread, string> = new WeakMap();
     private isLocalProvider: boolean = true;
 
     constructor(private sessionService: ReviewSessionService) {
@@ -35,12 +36,21 @@ export class ReviewCommentController {
         this.isLocalProvider = isLocal;
     }
 
-    /** Display review issues as inline comments */
+    /** Display review issues as inline comments, grouping replies under parent threads */
     async showIssues(issues: ReviewIssue[], baseUri: vscode.Uri): Promise<void> {
         this.clearAll();
 
-        for (const issue of issues) {
+        // Separate root issues from replies
+        const rootIssues = issues.filter(i => !i.parentIssueId);
+        const replies = issues.filter(i => i.parentIssueId);
+
+        for (const issue of rootIssues) {
             await this.addIssueThread(issue, baseUri);
+        }
+
+        // Add replies to their parent threads
+        for (const reply of replies) {
+            this.addReplyToThread(reply);
         }
     }
 
@@ -67,6 +77,34 @@ export class ReviewCommentController {
         thread.canReply = true;
 
         this.threads.set(issue.id, thread);
+        this.threadToIssueId.set(thread, issue.id);
+    }
+
+    /** Add a reply comment to an existing parent thread */
+    addReplyToThread(reply: ReviewIssue): void {
+        const parentId = reply.parentIssueId;
+        if (!parentId) { return; }
+
+        const thread = this.threads.get(parentId);
+        if (!thread) {
+            logger.warn(`Cannot add reply ${reply.id}: parent thread ${parentId} not found`);
+            return;
+        }
+
+        const isDraft = reply.status === 'draft';
+        const comment: vscode.Comment = {
+            body: new vscode.MarkdownString(isDraft ? `📝 *(draft)* ${reply.details}` : reply.details),
+            author: { name: this.getAuthorLabel(reply) },
+            mode: vscode.CommentMode.Preview,
+            contextValue: reply.status,
+        };
+
+        thread.comments = [...thread.comments, comment];
+    }
+
+    /** Look up which issue ID owns a given comment thread */
+    getIssueIdForThread(thread: vscode.CommentThread): string | undefined {
+        return this.threadToIssueId.get(thread);
     }
 
     /** Update the display of an existing issue */

@@ -31,6 +31,8 @@ export interface ICommentProvider {
     getComments(pullRequestId: string): Promise<ReviewIssue[]>;
     /** Publish a draft comment to the provider */
     publishComment(pullRequestId: string, issue: ReviewIssue): Promise<ReviewIssue>;
+    /** Reply to an existing published comment */
+    replyToComment?(pullRequestId: string, parentProviderCommentId: string, body: string): Promise<ReviewIssue>;
     /** Update an existing published comment */
     updateComment(pullRequestId: string, issue: ReviewIssue): Promise<ReviewIssue>;
     /** Delete a comment from the provider */

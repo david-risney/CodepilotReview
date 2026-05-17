@@ -210,13 +210,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const text = reply.text?.trim();
             if (!text) { return; }
 
-            const newComment: vscode.Comment = {
-                body: new vscode.MarkdownString(text),
-                author: { name: '👤 You' },
-                mode: vscode.CommentMode.Preview,
+            // Find the parent issue that owns this thread
+            const parentIssueId = commentController.getIssueIdForThread(thread);
+            if (!parentIssueId) {
+                logger.warn('Reply: cannot find parent issue for thread');
+                return;
+            }
+
+            const parentIssue = sessionService.getIssues().find(i => i.id === parentIssueId);
+
+            // Create a draft ReviewIssue for the reply
+            const replyIssue: ReviewIssue = {
+                id: `reply-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                summary: text.split('\n')[0].slice(0, 120),
+                details: text,
+                position: parentIssue?.position ?? { filePath: '', line: 0, side: 'head' },
+                status: 'draft',
+                source: 'user',
+                createdAt: new Date(),
+                parentIssueId,
             };
 
-            thread.comments = [...thread.comments, newComment];
+            // Add to session service (fires onDidChangeIssues → updates tree view)
+            sessionService.addIssue(replyIssue);
+
+            // Add visual reply to the comment thread
+            commentController.addReplyToThread(replyIssue);
+
+            logger.info(`Reply created as draft: ${replyIssue.id} → parent ${parentIssueId}`);
         }),
 
         vscode.commands.registerCommand('codepilotReview.selectProvider', async () => {

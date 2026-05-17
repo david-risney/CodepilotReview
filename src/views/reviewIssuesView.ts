@@ -29,11 +29,13 @@ export class ReviewIssuesViewProvider implements vscode.TreeDataProvider<ReviewI
         }
 
         if (element.isGroup) {
-            const issues = this.sessionService.getIssuesByStatus(element.groupStatus!);
+            // Only show root issues (not replies) in status groups
+            const issues = this.sessionService.getIssuesByStatus(element.groupStatus!)
+                .filter(i => !i.parentIssueId);
             return issues.map(issue => new ReviewIssueTreeItem(issue));
         }
 
-        // Issue details as children
+        // Issue details and replies as children
         if (element.issue) {
             return this.getIssueDetails(element.issue);
         }
@@ -52,7 +54,9 @@ export class ReviewIssuesViewProvider implements vscode.TreeDataProvider<ReviewI
         ];
 
         for (const { status, label, icon } of statuses) {
-            const issues = this.sessionService.getIssuesByStatus(status);
+            // Count only root issues for group display
+            const issues = this.sessionService.getIssuesByStatus(status)
+                .filter(i => !i.parentIssueId);
             if (issues.length > 0) {
                 groups.push(ReviewIssueTreeItem.group(label, status, issues.length, icon));
             }
@@ -85,6 +89,12 @@ export class ReviewIssuesViewProvider implements vscode.TreeDataProvider<ReviewI
 
         if (issue.suggestedFix) {
             details.push(ReviewIssueTreeItem.detail(`💡 Fix available (${issue.suggestedFix.kind})`));
+        }
+
+        // Show replies as children of this issue
+        const replies = this.sessionService.getIssues().filter(i => i.parentIssueId === issue.id);
+        for (const reply of replies) {
+            details.push(ReviewIssueTreeItem.reply(reply));
         }
 
         return details;
@@ -142,6 +152,22 @@ export class ReviewIssueTreeItem extends vscode.TreeItem {
         const item = new ReviewIssueTreeItem();
         item.label = text;
         item.iconPath = new vscode.ThemeIcon('info');
+        return item;
+    }
+
+    static reply(reply: ReviewIssue): ReviewIssueTreeItem {
+        const item = new ReviewIssueTreeItem();
+        const statusLabel = reply.status === 'draft' ? '📝 ' : '';
+        const truncated = reply.details.length > 80
+            ? reply.details.substring(0, 80) + '...'
+            : reply.details;
+        item.label = `${statusLabel}↩ ${truncated}`;
+        item.description = reply.status;
+        item.iconPath = new vscode.ThemeIcon('comment');
+        item.tooltip = new vscode.MarkdownString(
+            `**Reply** (${reply.status})\n\n${reply.details}`
+        );
+        item.contextValue = `reviewIssueReply:${reply.status}`;
         return item;
     }
 

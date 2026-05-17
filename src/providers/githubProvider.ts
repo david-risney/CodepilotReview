@@ -307,6 +307,7 @@ function mapComment(c: any): ReviewIssue {
         source: 'provider',
         createdAt: new Date(c.created_at),
         providerCommentId: String(c.id),
+        parentIssueId: c.in_reply_to_id ? String(c.in_reply_to_id) : undefined,
     };
 }
 
@@ -683,6 +684,19 @@ class GitHubCommentProvider implements ICommentProvider {
                 providerCommentId: String(resp.data.id),
             };
         }
+    }
+
+    async replyToComment(pullRequestId: string, parentProviderCommentId: string, body: string): Promise<ReviewIssue> {
+        const token = await requireToken();
+        const { owner, repo } = this.provider.parsePrId(pullRequestId);
+
+        const resp = await githubRequest<any>(
+            `/repos/${owner}/${repo}/pulls/comments/${parentProviderCommentId}/replies`,
+            token,
+            { method: 'POST', body: { body } },
+        );
+
+        return mapComment(resp.data);
     }
 
     async updateComment(pullRequestId: string, issue: ReviewIssue): Promise<ReviewIssue> {
