@@ -30,6 +30,8 @@ export class CustomCommandTool implements IReviewTool {
             return [];
         }
 
+        context.onPhase?.('running command...');
+
         context.progress.report({ message: `Running ${this.name}...` });
 
         try {
@@ -130,7 +132,8 @@ export class CustomCommandTool implements IReviewTool {
                 `Parse the following tool output into code review issues. ` +
                 `Tool name: ${this.name}\nTool description: ${this.description}\n\nTool output:\n${output}`,
                 [],
-                context.cancellationToken
+                context.cancellationToken,
+                context.onPhase,
             );
         } catch {
             logger.warn(`AI parsing failed for ${this.name}, returning raw output as single issue`);
@@ -194,6 +197,6 @@ export class CustomPromptTool implements IReviewTool {
 
         context.progress.report({ message: `Running ${this.name} (AI prompt)...` });
 
-        return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken);
+        return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken, context.onPhase);
     }
 }

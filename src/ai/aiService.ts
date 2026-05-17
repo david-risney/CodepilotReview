@@ -30,7 +30,8 @@ export interface IAiService {
 
     /** Run a review prompt and parse into issues */
     reviewWithPrompt(
-        prompt: string, diff: DiffFile[], token?: vscode.CancellationToken
+        prompt: string, diff: DiffFile[], token?: vscode.CancellationToken,
+        onPhase?: (phase: string) => void,
     ): Promise<ReviewIssue[]>;
 
     /** Generate an outputParsePattern from example command output */
@@ -255,17 +256,20 @@ export class CopilotAiService implements IAiService {
     }
 
     async reviewWithPrompt(
-        prompt: string, diff: DiffFile[], token?: vscode.CancellationToken
+        prompt: string, diff: DiffFile[], token?: vscode.CancellationToken,
+        onPhase?: (phase: string) => void,
     ): Promise<ReviewIssue[]> {
         const diffText = this.formatDiffForPrompt(diff);
 
         // First pass: run the user's prompt
+        onPhase?.('analyzing code (pass 1/2)...');
         const firstPassMessages = [
             vscode.LanguageModelChatMessage.User(prompt + '\n\nCode change:\n' + diffText),
         ];
         const rawResult = await this.sendRequest(firstPassMessages, token);
 
         // Second pass: reformat into structured issues
+        onPhase?.('structuring results (pass 2/2)...');
         const reformatMessages = [
             vscode.LanguageModelChatMessage.User(
                 'Convert the following code review feedback into a JSON array of issues.\n' +
@@ -378,7 +382,8 @@ export class StubAiService implements IAiService {
     }
 
     async reviewWithPrompt(
-        _prompt: string, _diff: DiffFile[], _token?: vscode.CancellationToken
+        _prompt: string, _diff: DiffFile[], _token?: vscode.CancellationToken,
+        _onPhase?: (phase: string) => void,
     ): Promise<ReviewIssue[]> {
         return [];
     }

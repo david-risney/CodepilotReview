@@ -43,11 +43,12 @@ export class ReviewToolManager {
             : Array.from(this.tools.values());
 
         const allIssues: ReviewIssue[] = [];
+        const totalFiles = input.diff.length;
 
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
-                title: 'Running review tools...',
+                title: 'Review Tools',
                 cancellable: true,
             },
             async (progress, token) => {
@@ -57,9 +58,10 @@ export class ReviewToolManager {
                     }
 
                     const tool = toolsToRun[i];
+                    const toolLabel = `(${i + 1}/${toolsToRun.length}) ${tool.name}`;
                     progress.report({
-                        message: `Running ${tool.name}...`,
-                        increment: (100 / toolsToRun.length),
+                        message: `${toolLabel}: analyzing ${totalFiles} file(s)...`,
+                        increment: 0,
                     });
 
                     try {
@@ -69,20 +71,72 @@ export class ReviewToolManager {
                             workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
                         };
 
-                        const issues = await tool.run(input, context);
+                        // Report phase changes within the tool via progress
+                        const toolProgress = this.createToolProgressReporter(progress, toolLabel, totalFiles);
+
+                        const issues = await this.runToolWithProgress(tool, input, context, toolProgress);
                         allIssues.push(...issues);
+
+                        progress.report({
+                            message: `${toolLabel}: done — ${issues.length} issue(s) found. Total: ${allIssues.length}`,
+                            increment: (100 / toolsToRun.length),
+                        });
+
                         logger.info(`Tool ${tool.name} found ${issues.length} issues`);
                     } catch (error) {
                         logger.error(`Tool ${tool.name} failed`, error);
+                        progress.report({
+                            message: `${toolLabel}: failed — ${error}`,
+                            increment: (100 / toolsToRun.length),
+                        });
                         vscode.window.showWarningMessage(
                             `Review tool "${tool.name}" failed: ${error}`
                         );
                     }
                 }
+
+                if (allIssues.length > 0) {
+                    progress.report({ message: `Complete — ${allIssues.length} issue(s) found` });
+                } else {
+                    progress.report({ message: 'Complete — no issues found' });
+                }
             }
         );
 
         return allIssues;
+    }
+
+    /** Create a progress reporter that tools can use for sub-step updates */
+    private createToolProgressReporter(
+        progress: vscode.Progress<{ message?: string; increment?: number }>,
+        toolLabel: string,
+        totalFiles: number,
+    ) {
+        return {
+            reportPhase(phase: string) {
+                progress.report({ message: `${toolLabel}: ${phase}` });
+            },
+            reportFile(fileName: string, fileIndex: number) {
+                progress.report({
+                    message: `${toolLabel}: file ${fileIndex + 1}/${totalFiles} — ${fileName}`,
+                });
+            },
+        };
+    }
+
+    /** Run a single tool, reporting AI pass phases */
+    private async runToolWithProgress(
+        tool: IReviewTool,
+        input: ReviewToolInput,
+        context: ReviewToolContext,
+        toolProgress: { reportPhase: (phase: string) => void },
+    ): Promise<ReviewIssue[]> {
+        const phaseContext: ReviewToolContext = {
+            ...context,
+            onPhase: (phase: string) => toolProgress.reportPhase(phase),
+        };
+
+        return tool.run(input, phaseContext);
     }
 
     private registerBuiltInTools(): void {
@@ -126,6 +180,8 @@ class HistoricReviewTool implements IReviewTool {
             return [];
         }
 
+        context.onPhase?.('gathering git history...');
+
         // Gather git history for changed files
         let historyContext = '';
         if (context.workspaceRoot) {
@@ -146,7 +202,7 @@ class HistoricReviewTool implements IReviewTool {
                 : '') +
             'Only report real, actionable issues. Do not report style nits.';
 
-        return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken);
+        return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken, context.onPhase);
     }
 
     private async getGitHistory(files: string[], cwd: string): Promise<string> {
@@ -188,6 +244,8 @@ class MetaQuestionsTool implements IReviewTool {
             return [];
         }
 
+        context.onPhase?.('gathering reviewer context...');
+
         // Get reviewer info from git history for context
         let reviewerContext = '';
         if (context.workspaceRoot) {
@@ -210,7 +268,7 @@ class MetaQuestionsTool implements IReviewTool {
                 : '') +
             'Only report genuine concerns. Use file path "GENERAL" and line 1 for project-level issues.';
 
-        return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken);
+        return this.aiService.reviewWithPrompt(prompt, input.diff, context.cancellationToken, context.onPhase);
     }
 
     private async getReviewerContext(input: ReviewToolInput, context: ReviewToolContext): Promise<string> {

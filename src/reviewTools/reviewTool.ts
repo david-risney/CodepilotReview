@@ -23,4 +23,6 @@ export interface ReviewToolContext {
     cancellationToken: vscode.CancellationToken;
     progress: vscode.Progress<{ message?: string; increment?: number }>;
     workspaceRoot: string;
+    /** Report a sub-phase of the tool's execution */
+    onPhase?: (phase: string) => void;
 }
