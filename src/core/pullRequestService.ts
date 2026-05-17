@@ -67,8 +67,26 @@ export class PullRequestService {
 
         try {
             const apiFilter = this.translateQuery(query);
-            const prs = await instance.provider.pullRequests.getPullRequests(apiFilter);
-            this.cachedPRs.set(cacheKey, prs);
+            const freshPrs = await instance.provider.pullRequests.getPullRequests(apiFilter);
+
+            // Preserve AI enrichment data from previously cached PRs
+            const oldPrs = this.cachedPRs.get(cacheKey);
+            if (oldPrs) {
+                const oldById = new Map(oldPrs.map(p => [p.id, p]));
+                for (const pr of freshPrs) {
+                    const old = oldById.get(pr.id);
+                    if (old) {
+                        pr.aiSummary = pr.aiSummary ?? old.aiSummary;
+                        pr.priority = pr.priority ?? old.priority;
+                        pr.relevantLinks = pr.relevantLinks ?? old.relevantLinks;
+                        if (old.userNeed && !pr.userNeed) {
+                            pr.userNeed = old.userNeed;
+                        }
+                    }
+                }
+            }
+
+            this.cachedPRs.set(cacheKey, freshPrs);
         } catch (error) {
             logger.error(`Failed to fetch PRs for view "${viewId}" from "${providerId}"`, error);
             // Fall back to cached
