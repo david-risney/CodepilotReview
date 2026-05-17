@@ -114,17 +114,13 @@ export class PartitionTreeNode extends vscode.TreeItem {
 }
 
 class FileTreeNode extends vscode.TreeItem {
-    constructor(label: string, filePath: string) {
+    constructor(label: string, public readonly filePath: string) {
         super(label, vscode.TreeItemCollapsibleState.None);
         this.iconPath = new vscode.ThemeIcon('file');
-        const wsFolder = vscode.workspace.workspaceFolders?.[0];
-        const fileUri = wsFolder
-            ? vscode.Uri.joinPath(wsFolder.uri, filePath)
-            : vscode.Uri.file(filePath);
         this.command = {
-            command: 'vscode.open',
-            title: 'Open File',
-            arguments: [fileUri],
+            command: 'codepilotReview.openFileDiff',
+            title: 'Open File Diff',
+            arguments: [filePath],
         };
     }
 }

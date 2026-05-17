@@ -217,6 +217,12 @@
         "icon": "$(diff)"
       },
       {
+        "command": "codepilotReview.openFileDiff",
+        "title": "Open File as Diff",
+        "category": "CodepilotReview",
+        "icon": "$(diff)"
+      },
+      {
         "command": "codepilotReview.generateParsePattern",
         "title": "Generate Parse Pattern from Example Output",
         "category": "CodepilotReview"
@@ -475,6 +481,24 @@
                   }
                 }
               }
+            }
+          }
+        },
+        "codepilotReview.diffMode": {
+          "type": "object",
+          "default": {},
+          "description": "Controls how diff views are displayed. Configure which content appears on each side.",
+          "markdownDescription": "Controls which content appears on the left and right sides of diff views.\n\nSide options:\n- `remote-before`: File content before the code review change (from the provider)\n- `remote-after`: File content after the code review change (from the provider)\n- `local-current`: The file as it exists on disk right now (including uncommitted changes)\n- `local-branch-base`: The file at the point where the current branch diverged from the base branch\n\nDefaults:\n- Remote providers (GitHub, ADO, Chromium): left=`remote-before`, right=`remote-after`\n- Local provider: left=`local-branch-base`, right=`local-current`\n\nExample — compare remote PR changes against your local working copy:\n```json\n{\n  \"left\": \"remote-before\",\n  \"right\": \"local-current\"\n}\n```",
+          "properties": {
+            "left": {
+              "type": "string",
+              "enum": ["remote-before", "remote-after", "local-current", "local-branch-base"],
+              "description": "Content source for the left (old) side of the diff"
+            },
+            "right": {
+              "type": "string",
+              "enum": ["remote-before", "remote-after", "local-current", "local-branch-base"],
+              "description": "Content source for the right (new) side of the diff"
             }
           }
         }

@@ -171,16 +171,19 @@ export class CodeTourService {
         const step = this.currentTour.steps[index];
         if (!step) { return; }
 
-        const fileUri = this.getStepUri(step);
-        if (!fileUri) { return; }
-
         try {
-            const doc = await vscode.workspace.openTextDocument(fileUri);
-            const line = Math.max(0, step.line - 1);
-            await vscode.window.showTextDocument(doc, {
-                preview: false,
-                selection: new vscode.Range(line, 0, line, 0),
-            });
+            // Use the openFileDiff command to open as diff view
+            await vscode.commands.executeCommand('codepilotReview.openFileDiff', step.filePath);
+
+            // After diff opens, scroll to the relevant line
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+                const line = Math.max(0, step.line - 1);
+                const range = new vscode.Range(line, 0, line, 0);
+                editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+                editor.selection = new vscode.Selection(range.start, range.start);
+            }
+
             this.updateDecorations();
         } catch (error) {
             logger.error(`Failed to navigate to tour step: ${step.filePath}:${step.line}`, error);

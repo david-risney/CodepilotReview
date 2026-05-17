@@ -85,6 +85,15 @@ export interface DiffFile {
 
 export type FileChangeType = 'added' | 'deleted' | 'modified' | 'renamed' | 'copied';
 
+/** Which content source to use for each side of the diff viewer */
+export type DiffSide = 'remote-before' | 'remote-after' | 'local-current' | 'local-branch-base';
+
+/** Configuration for how diffs are displayed */
+export interface DiffMode {
+    left: DiffSide;
+    right: DiffSide;
+}
+
 export interface DiffHunk {
     oldStart: number;
     oldLines: number;

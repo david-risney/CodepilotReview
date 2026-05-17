@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReviewIssue, PullRequestStatus, ReviewPriority, UserNeedLevel, ProviderView, ProviderViewQuery } from './types';
+import { ReviewIssue, PullRequestStatus, ReviewPriority, UserNeedLevel, ProviderView, ProviderViewQuery, DiffFile } from './types';
 import { Configuration } from './config/configuration';
 import { ProviderManager } from './providers/providerManager';
 import { PullRequestService } from './core/pullRequestService';
@@ -13,7 +13,7 @@ import { PartitionViewProvider, SchemeTreeNode } from './views/partitionView';
 import { CodeTourViewProvider } from './views/codeTourView';
 import { CodeTourCodeLensProvider } from './views/codeTourCodeLens';
 import { ChatPanel } from './views/chatPanel';
-import { DiffContentProvider, openDiffView } from './views/diffContentProvider';
+import { DiffContentProvider, openDiffView, openFileDiff, getMergeBase } from './views/diffContentProvider';
 import { ReviewCommentController } from './comments/commentController';
 import { ReviewToolManager } from './reviewTools/reviewToolManager';
 import { ReviewStore } from './storage/reviewStore';
@@ -112,7 +112,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Register virtual document provider for read-only diff viewing
     const diffContentProvider = new DiffContentProvider();
     context.subscriptions.push(
-        vscode.workspace.registerTextDocumentContentProvider('codepilot-diff', diffContentProvider)
+        vscode.workspace.registerTextDocumentContentProvider('codepilot-diff', diffContentProvider),
+        vscode.workspace.registerTextDocumentContentProvider('codepilot-empty', diffContentProvider),
     );
     context.subscriptions.push(diffContentProvider);
 
@@ -976,6 +977,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
             } catch (error) {
                 showError(error);
+            }
+        }),
+
+        // --- Open File as Diff ---
+        vscode.commands.registerCommand('codepilotReview.openFileDiff', async (filePath: string) => {
+            const prId = sessionService.getCurrentPrId();
+            const providerId = sessionService.getCurrentProviderId();
+            const diff = sessionService.getDiff();
+            const providerInstance = providerId ? providerManager.getProvider(providerId) : undefined;
+
+            // Find the DiffFile for this path
+            const diffFile = diff.find(f =>
+                f.newPath === filePath || f.oldPath === filePath
+            );
+
+            if (diffFile && prId) {
+                // Compute merge-base for local-branch-base side if needed
+                let mergeBase: string | undefined;
+                const providerType = providerInstance?.type;
+                const diffModeConfig = vscode.workspace.getConfiguration('codepilotReview').get<any>('diffMode') || {};
+                const needsBase = providerType === 'local'
+                    || diffModeConfig.left === 'local-branch-base'
+                    || diffModeConfig.right === 'local-branch-base';
+                if (needsBase) {
+                    mergeBase = await getMergeBase(
+                        (providerInstance?.config as any)?.baseBranch
+                    );
+                }
+
+                await openFileDiff(diffFile, prId, {
+                    providerId,
+                    providerType,
+                    mergeBase,
+                    preview: true,
+                });
+            } else {
+                // Fallback: open the file normally
+                const wsFolder = vscode.workspace.workspaceFolders?.[0];
+                const fileUri = wsFolder
+                    ? vscode.Uri.joinPath(wsFolder.uri, filePath)
+                    : vscode.Uri.file(filePath);
+                await vscode.commands.executeCommand('vscode.open', fileUri);
             }
         }),
 
