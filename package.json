@@ -247,16 +247,17 @@
       "codepilotReview": [
         {
           "id": "codepilotReview.prList",
-          "name": "Pull Requests"
-        },
-        {
-          "id": "codepilotReview.reviewIssues",
-          "name": "Review Issues",
-          "when": "codepilotReview.hasActiveReview && !codepilotReview.hasActiveTour"
+          "name": "Pull Requests",
+          "visibility": "visible"
         },
         {
           "id": "codepilotReview.partitions",
           "name": "Partitions",
+          "when": "codepilotReview.hasActiveReview && !codepilotReview.hasActiveTour"
+        },
+        {
+          "id": "codepilotReview.reviewIssues",
+          "name": "Review Issues",
           "when": "codepilotReview.hasActiveReview && !codepilotReview.hasActiveTour"
         },
         {

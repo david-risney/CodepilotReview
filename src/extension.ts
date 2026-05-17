@@ -172,6 +172,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             try {
                 await sessionService.openReview(pr);
                 vscode.commands.executeCommand('setContext', 'codepilotReview.hasActiveReview', true);
+                // Focus partitions view so it's prominent after selecting a review
+                vscode.commands.executeCommand('codepilotReview.partitions.focus');
                 await store.addReviewedPrId(pr.id);
                 const issues = sessionService.getIssues();
                 const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
